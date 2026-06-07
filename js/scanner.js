@@ -3,6 +3,8 @@
 
 let html5QrcodeScanner = null;
 let currentCameraId = null;
+let isStarting = false;
+let shouldStopAfterStart = false;
 
 /**
  * Obtém a lista de câmeras disponíveis no dispositivo.
@@ -35,6 +37,8 @@ export async function startScanner(elementId, onScanSuccess, onScanError = null,
 
   // Cria a instância do leitor apontando para o elemento HTML
   html5QrcodeScanner = new Html5Qrcode(elementId);
+  isStarting = true;
+  shouldStopAfterStart = false;
 
   // Configuração focada em códigos de barras de varejo (EAN, UPC, etc.)
   const formats = [
@@ -57,11 +61,18 @@ export async function startScanner(elementId, onScanSuccess, onScanError = null,
         height: Math.floor(boxHeight)
       };
     },
-    aspectRatio: 1.0,
-    formatsToSupport: formats
+    formatsToSupport: formats,
+    // Restrições de resolução HD inseridas aqui
+    videoConstraints: {
+      width: { min: 640, ideal: 1280, max: 1920 },
+      height: { min: 480, ideal: 720, max: 1080 }
+    }
   };
 
   const handleSuccess = (decodedText, decodedResult) => {
+    // Se o fechamento foi disparado no meio tempo, ignora leituras
+    if (shouldStopAfterStart) return;
+
     // Feedback tátil de sucesso (vibração de 120 milissegundos)
     if (navigator.vibrate) {
       try {
@@ -82,10 +93,10 @@ export async function startScanner(elementId, onScanSuccess, onScanError = null,
     }
   };
 
-  // Define qual câmera usar
-  let cameraConfig = { facingMode: 'environment' }; // Câmera traseira padrão
+  // Define qual câmera usar (Exatamente 1 chave se for objeto para obedecer a biblioteca)
+  let cameraConfig = { facingMode: 'environment' }; 
   if (preferredCameraId) {
-    cameraConfig = preferredCameraId;
+    cameraConfig = preferredCameraId; // Passa o ID da câmera diretamente como string
     currentCameraId = preferredCameraId;
   }
 
@@ -96,7 +107,16 @@ export async function startScanner(elementId, onScanSuccess, onScanError = null,
       handleSuccess,
       handleError
     );
+    isStarting = false;
+
+    // Se o usuário clicou para fechar enquanto estava iniciando
+    if (shouldStopAfterStart) {
+      console.log('[Scanner] Inicialização tardia cancelada pelo usuário. Parando câmera...');
+      await stopScanner();
+    }
   } catch (error) {
+    isStarting = false;
+    shouldStopAfterStart = false;
     console.error('Erro ao iniciar a câmera:', error);
     html5QrcodeScanner = null;
     throw error;
@@ -108,6 +128,12 @@ export async function startScanner(elementId, onScanSuccess, onScanError = null,
  * @returns {Promise<void>}
  */
 export async function stopScanner() {
+  if (isStarting) {
+    console.log('[Scanner] Câmera está abrindo. Sinalizando para fechar logo após iniciar.');
+    shouldStopAfterStart = true;
+    return Promise.resolve();
+  }
+
   if (!html5QrcodeScanner) return Promise.resolve();
 
   try {
@@ -118,6 +144,8 @@ export async function stopScanner() {
     console.error('Erro ao parar o scanner:', error);
   } finally {
     html5QrcodeScanner = null;
+    isStarting = false;
+    shouldStopAfterStart = false;
   }
 }
 
