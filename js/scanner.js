@@ -62,10 +62,12 @@ export async function startScanner(elementId, onScanSuccess, onScanError = null,
       };
     },
     formatsToSupport: formats,
-    // Restrições de resolução HD inseridas aqui
+    // Restrições de resolução HD e direcionamento de ID da câmera
     videoConstraints: {
       width: { min: 640, ideal: 1280, max: 1920 },
-      height: { min: 480, ideal: 720, max: 1080 }
+      height: { min: 480, ideal: 720, max: 1080 },
+      deviceId: preferredCameraId ? { exact: preferredCameraId } : undefined,
+      facingMode: preferredCameraId ? undefined : 'environment'
     }
   };
 
@@ -96,7 +98,7 @@ export async function startScanner(elementId, onScanSuccess, onScanError = null,
   // Define qual câmera usar (Exatamente 1 chave se for objeto para obedecer a biblioteca)
   let cameraConfig = { facingMode: 'environment' }; 
   if (preferredCameraId) {
-    cameraConfig = preferredCameraId; // Passa o ID da câmera diretamente como string
+    cameraConfig = { deviceId: { exact: preferredCameraId } }; // Usando objeto com exatamente 1 chave
     currentCameraId = preferredCameraId;
   }
 
