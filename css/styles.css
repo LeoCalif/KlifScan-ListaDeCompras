@@ -1369,3 +1369,97 @@ select.input-control {
   40%, 80% { transform: translateX(8px); }
 }
 
+/* --- ESTILOS NOVOS PARA RECURSOS EXTRAS --- */
+
+/* Botão de Compartilhar */
+.btn-share {
+  background: linear-gradient(135deg, #25D366 0%, #128C7E 100%);
+  border: none;
+  box-shadow: 0 4px 12px rgba(37, 211, 102, 0.25);
+  color: #fff;
+}
+
+.btn-share:hover {
+  box-shadow: 0 6px 16px rgba(37, 211, 102, 0.4);
+  filter: brightness(1.1);
+}
+
+/* Modo Contínuo Ativo */
+#btn-scanner-continuous.active {
+  border-color: var(--accent-cyan);
+  color: var(--accent-cyan);
+  background: rgba(34, 211, 238, 0.15);
+  box-shadow: 0 0 15px var(--accent-cyan-glow);
+}
+
+/* Histórico de Preços no Modal */
+.price-history-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.price-history-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 8px 10px;
+  background: rgba(255, 255, 255, 0.02);
+  border: 1px solid var(--border-glass);
+  border-radius: 8px;
+  font-size: 12px;
+}
+
+.price-history-date {
+  color: var(--text-secondary);
+  font-weight: 500;
+}
+
+.price-history-value-container {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.price-history-val {
+  font-weight: 700;
+  font-family: var(--font-title);
+  color: var(--text-primary);
+}
+
+.price-trend {
+  font-size: 10px;
+  font-weight: 700;
+  padding: 2px 6px;
+  border-radius: 6px;
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+}
+
+.price-trend.up {
+  background: rgba(244, 63, 94, 0.1);
+  color: var(--color-danger);
+}
+
+.price-trend.down {
+  background: rgba(34, 197, 94, 0.15);
+  color: var(--color-success);
+}
+
+.price-trend.equal {
+  background: rgba(255, 255, 255, 0.05);
+  color: var(--text-secondary);
+}
+
+/* Correção visual para centralizar Modais de Diálogo Confirm/Prompt */
+#modal-confirm .modal-container, 
+#modal-prompt .modal-container {
+  margin-bottom: auto;
+  margin-top: auto;
+  border-bottom: 1px solid var(--border-glass);
+  border-radius: 24px;
+}
+
+

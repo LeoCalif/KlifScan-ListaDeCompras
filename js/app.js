@@ -31,6 +31,9 @@ let appState = {
   tempBarcode: null,    // Código temporário durante escaneamento e cadastro
   tempQty: 1,           // Quantidade temporária para inserção após scan
   torchActive: false,   // Estado da lanterna da câmera
+  continuousScan: false, // Modo de escaneamento contínuo
+  lastScannedBarcode: null, // Evitar bipes múltiplos em seguida no modo contínuo
+  lastScanTimestamp: 0,
   cameras: []           // Câmeras disponíveis
 };
 
@@ -38,6 +41,9 @@ let appState = {
 document.addEventListener('DOMContentLoaded', async () => {
   // 1. Registra o Service Worker para suporte PWA offline
   registerServiceWorker();
+
+  // 2. Inicializa os ouvintes de diálogos/modais personalizados
+  setupCustomDialogListeners();
 
   // Inicializa o controle de acesso local
   initAuth(async () => {
@@ -172,14 +178,16 @@ function setupEventListeners() {
     }
   });
 
-  // 3. Finalizar Compra
+  // 3. Finalizar Compra e Compartilhar
   document.getElementById('btn-finish-shopping').addEventListener('click', () => {
     finishShoppingList();
   });
+  document.getElementById('btn-share-shopping').addEventListener('click', shareActiveShoppingList);
 
   // 4. Cancelar Compra
-  document.getElementById('btn-cancel-shopping').addEventListener('click', () => {
-    if (confirm('Deseja realmente cancelar esta compra? Todos os itens adicionados a esta lista serão removidos.')) {
+  document.getElementById('btn-cancel-shopping').addEventListener('click', async () => {
+    const ok = await showCustomConfirm('Cancelar Compra', 'Deseja realmente cancelar esta compra? Todos os itens adicionados a esta lista serão removidos.');
+    if (ok) {
       cancelShoppingList();
     }
   });
@@ -208,6 +216,7 @@ function setupEventListeners() {
   document.getElementById('btn-scan-trigger').addEventListener('click', openScannerOverlay);
   document.getElementById('btn-scanner-close').addEventListener('click', closeScannerOverlay);
   document.getElementById('btn-scanner-torch').addEventListener('click', handleToggleTorch);
+  document.getElementById('btn-scanner-continuous').addEventListener('click', handleToggleContinuousScan);
   document.getElementById('btn-scanner-manual').addEventListener('click', handleManualBarcodeEntry);
   document.getElementById('scanner-camera-select').addEventListener('change', handleCameraChange);
 
@@ -533,16 +542,18 @@ async function updateItemQty(barcode, change) {
     const newQty = item.quantity + change;
 
     if (newQty <= 0) {
-      if (confirm(`Deseja remover o produto "${item.name}" da lista?`)) {
+      const ok = await showCustomConfirm('Remover Item', `Deseja remover o produto "${item.name}" da lista?`);
+      if (ok) {
         appState.activeList.items.splice(itemIndex, 1);
         showToast('Produto removido da lista.', 'info');
+        await saveActiveListState();
+        renderActiveList();
       }
     } else {
       item.quantity = newQty;
+      await saveActiveListState();
+      renderActiveList();
     }
-    
-    await saveActiveListState();
-    renderActiveList();
   }
 }
 
@@ -573,6 +584,18 @@ async function openScannerOverlay() {
   // Inicializa botões
   appState.torchActive = false;
   document.getElementById('btn-scanner-torch').style.color = '#fff';
+
+  // Reseta estado e visual do botão contínuo
+  const btnCont = document.getElementById('btn-scanner-continuous');
+  if (appState.continuousScan) {
+    btnCont.classList.add('active');
+  } else {
+    btnCont.classList.remove('active');
+  }
+
+  // Limpa estados de debounce
+  appState.lastScannedBarcode = null;
+  appState.lastScanTimestamp = 0;
 
   try {
     // 1. Obtém as câmeras
@@ -652,8 +675,8 @@ async function handleToggleTorch() {
 }
 
 // Entrada de código de barras manual quando a câmera falha ou código está rasgado
-function handleManualBarcodeEntry() {
-  const code = prompt('Digite o código de barras (EAN-13 ou EAN-8):');
+async function handleManualBarcodeEntry() {
+  const code = await showCustomPrompt('Entrada Manual', 'Digite o código de barras (EAN-13 ou EAN-8):');
   if (code && code.trim()) {
     handleDecodedBarcode(code.trim());
   }
@@ -661,10 +684,25 @@ function handleManualBarcodeEntry() {
 
 // Callback invocado após sucesso na leitura de código
 async function handleDecodedBarcode(barcode) {
-  // Fecha a câmera
-  await closeScannerOverlay();
+  // Evita leituras múltiplas no modo contínuo
+  if (appState.continuousScan && barcode === appState.lastScannedBarcode) {
+    if (Date.now() - appState.lastScanTimestamp < 2000) {
+      return; // Ignora leitura muito rápida do mesmo produto
+    }
+  }
 
-  showToast(`Código escaneado: ${barcode}`, 'success');
+  appState.lastScannedBarcode = barcode;
+  appState.lastScanTimestamp = Date.now();
+
+  // Se NÃO for modo contínuo, fecha a câmera na hora
+  if (!appState.continuousScan) {
+    await closeScannerOverlay();
+  }
+
+  // Feedback tátil de sucesso
+  if (appState.vibrateEnabled && navigator.vibrate) {
+    try { navigator.vibrate(80); } catch (e) {}
+  }
 
   // Verifica se o produto já existe no banco de dados local
   const localProduct = await getProduct(barcode);
@@ -675,32 +713,49 @@ async function handleDecodedBarcode(barcode) {
     renderActiveList();
   } else {
     // Produto não encontrado localmente
-    const wantToAdd = confirm(`Produto com código ${barcode} não está cadastrado. Deseja adicioná-lo?`);
-    if (!wantToAdd) {
-      showToast('Cadastro cancelado pelo usuário.', 'info');
-      return;
-    }
-
-    appState.tempBarcode = barcode;
-    appState.tempQty = 1;
-    document.getElementById('scan-qty-val').textContent = 1;
-
-    // Se estiver online e a busca na API estiver habilitada
-    if (navigator.onLine && appState.apiEnabled) {
-      showToast('Buscando dados do produto na nuvem...', 'info');
-      
-      const apiProduct = await fetchProductFromAPI(barcode);
-      if (apiProduct) {
-        // Abre o modal pré-preenchido
-        openProductModalWithData(apiProduct, true);
-      } else {
-        // Não achou na API externa, abre em branco com código preenchido
-        openProductModalWithData({ barcode: barcode, name: '', brand: '', category: 'Mercearia', price: 0 }, true);
-        showToast('Produto não encontrado na nuvem. Insira os dados.', 'info');
-      }
+    if (appState.continuousScan) {
+      // Modo contínuo: não interrompe. Adiciona um produto temporário.
+      const tempProduct = {
+        barcode: barcode,
+        name: `Prod não cadastrado (${barcode})`,
+        brand: 'Pendente',
+        category: 'Outros',
+        price: 0,
+        image: ''
+      };
+      await saveProduct(tempProduct);
+      await addItemToActiveShoppingList(tempProduct, 1);
+      showToast(`Adicionado pendente (${barcode})`, 'warning');
+      renderActiveList();
     } else {
-      // Offline ou API desativada
-      openProductModalWithData({ barcode: barcode, name: '', brand: '', category: 'Mercearia', price: 0 }, true);
+      // Modo normal: pergunta se quer cadastrar
+      const wantToAdd = await showCustomConfirm('Produto não cadastrado', `O produto com código ${barcode} não está cadastrado. Deseja adicioná-lo?`);
+      if (!wantToAdd) {
+        showToast('Cadastro cancelado pelo usuário.', 'info');
+        return;
+      }
+
+      appState.tempBarcode = barcode;
+      appState.tempQty = 1;
+      document.getElementById('scan-qty-val').textContent = 1;
+
+      // Se estiver online e a busca na API estiver habilitada
+      if (navigator.onLine && appState.apiEnabled) {
+        showToast('Buscando dados do produto na nuvem...', 'info');
+        
+        const apiProduct = await fetchProductFromAPI(barcode);
+        if (apiProduct) {
+          // Abre o modal pré-preenchido
+          await openProductModalWithData(apiProduct, true);
+        } else {
+          // Não achou na API externa, abre em branco com código preenchido
+          await openProductModalWithData({ barcode: barcode, name: '', brand: '', category: 'Mercearia', price: 0 }, true);
+          showToast('Produto não encontrado na nuvem. Insira os dados.', 'info');
+        }
+      } else {
+        // Offline ou API desativada
+        await openProductModalWithData({ barcode: barcode, name: '', brand: '', category: 'Mercearia', price: 0 }, true);
+      }
     }
   }
 }
@@ -763,6 +818,7 @@ async function openProductModal(barcode = null) {
       catSelect.value = p.category || 'Mercearia';
       priceInput.value = p.price > 0 ? p.price.toFixed(2) : '';
       updateProductPhotoUI(p.image);
+      await renderPriceHistory(p.barcode);
     }
   } else {
     // Novo sem código de barras (geramos um id aleatório para itens sem código real)
@@ -778,13 +834,14 @@ async function openProductModal(barcode = null) {
     priceInput.value = '';
     updateProductPhotoUI('');
     appState.tempBarcode = localBarcode;
+    document.getElementById('product-price-history-section').style.display = 'none';
   }
 
   document.getElementById('modal-product').classList.add('active');
 }
 
 // Abre o modal populado dinamicamente (normalmente pós-escaneamento)
-function openProductModalWithData(prod, isScanFlow = false) {
+async function openProductModalWithData(prod, isScanFlow = false) {
   const titleEl = document.getElementById('modal-product-title');
   const deleteBtn = document.getElementById('btn-prod-delete');
   const barcodeInput = document.getElementById('prod-barcode');
@@ -805,6 +862,7 @@ function openProductModalWithData(prod, isScanFlow = false) {
   catSelect.value = prod.category || 'Mercearia';
   priceInput.value = prod.price > 0 ? prod.price : '';
   updateProductPhotoUI(prod.image);
+  await renderPriceHistory(prod.barcode);
 
   // Exibe painel de quantidade especial se for fluxo de scan
   const qtySection = document.getElementById('scan-qty-section');
@@ -892,7 +950,8 @@ async function deleteProductFromModal() {
   const barcode = appState.tempBarcode;
   if (!barcode) return;
 
-  if (confirm('Deseja excluir este produto permanentemente do banco de dados local?')) {
+  const ok = await showCustomConfirm('Excluir Produto', 'Deseja excluir este produto permanentemente do banco de dados local?');
+  if (ok) {
     await deleteProduct(barcode);
     
     // Remove da lista ativa caso ele estivesse nela
@@ -1129,7 +1188,8 @@ async function deleteHistoryItem() {
   const id = historyDetailListId;
   if (!id) return;
 
-  if (confirm('Deseja realmente excluir esta lista de compra do histórico?')) {
+  const ok = await showCustomConfirm('Excluir Histórico', 'Deseja realmente excluir esta lista de compra do histórico?');
+  if (ok) {
     await deleteShoppingList(id);
     document.getElementById('modal-history-detail').classList.remove('active');
     showToast('Lista de compras excluída do histórico.', 'info');
@@ -1146,7 +1206,8 @@ async function cloneHistoryList() {
   if (!pastList) return;
 
   if (appState.activeList) {
-    if (!confirm('Você já possui uma compra ativa. Deseja substituí-la pelos produtos desta lista de histórico?')) {
+    const ok = await showCustomConfirm('Substituir Lista', 'Você já possui uma compra ativa. Deseja substituí-la pelos produtos desta lista de histórico?');
+    if (!ok) {
       return;
     }
     // Deleta a lista ativa se ela foi criada mas está sendo substituída
@@ -1343,4 +1404,239 @@ function handleProductPhotoUpload(event) {
     imgObj.src = e.target.result;
   };
   reader.readAsDataURL(file);
+}
+
+// --- LÓGICA DE DIÁLOGOS (CONFIRM/PROMPT) PERSONALIZADOS ---
+let confirmResolver = null;
+let promptResolver = null;
+
+function setupCustomDialogListeners() {
+  // Confirmações
+  document.getElementById('btn-confirm-yes').addEventListener('click', () => {
+    if (confirmResolver) {
+      confirmResolver(true);
+      confirmResolver = null;
+    }
+    document.getElementById('modal-confirm').classList.remove('active');
+  });
+
+  const closeConfirm = () => {
+    if (confirmResolver) {
+      confirmResolver(false);
+      confirmResolver = null;
+    }
+    document.getElementById('modal-confirm').classList.remove('active');
+  };
+  document.getElementById('btn-confirm-no').addEventListener('click', closeConfirm);
+  document.getElementById('btn-confirm-close').addEventListener('click', closeConfirm);
+
+  // Prompts/Inputs
+  document.getElementById('btn-prompt-submit').addEventListener('click', () => {
+    if (promptResolver) {
+      const val = document.getElementById('prompt-input').value.trim();
+      promptResolver(val);
+      promptResolver = null;
+    }
+    document.getElementById('modal-prompt').classList.remove('active');
+  });
+
+  const closePrompt = () => {
+    if (promptResolver) {
+      promptResolver(null);
+      promptResolver = null;
+    }
+    document.getElementById('modal-prompt').classList.remove('active');
+  };
+  document.getElementById('btn-prompt-cancel').addEventListener('click', closePrompt);
+  document.getElementById('btn-prompt-close').addEventListener('click', closePrompt);
+
+  document.getElementById('prompt-input').addEventListener('keypress', (e) => {
+    if (e.key === 'Enter') {
+      if (promptResolver) {
+        const val = document.getElementById('prompt-input').value.trim();
+        promptResolver(val);
+        promptResolver = null;
+      }
+      document.getElementById('modal-prompt').classList.remove('active');
+    }
+  });
+}
+
+function showCustomConfirm(title, message) {
+  if (confirmResolver) confirmResolver(false);
+
+  return new Promise((resolve) => {
+    confirmResolver = resolve;
+    document.getElementById('confirm-title').textContent = title || 'Confirmação';
+    document.getElementById('confirm-message').textContent = message || '';
+    document.getElementById('modal-confirm').classList.add('active');
+  });
+}
+
+function showCustomPrompt(title, label, defaultValue = '') {
+  if (promptResolver) promptResolver(null);
+
+  return new Promise((resolve) => {
+    promptResolver = resolve;
+    document.getElementById('prompt-title').textContent = title || 'Digitar Dados';
+    document.getElementById('prompt-label').textContent = label || 'Digite o valor:';
+    const input = document.getElementById('prompt-input');
+    input.value = defaultValue;
+    input.placeholder = label || '';
+
+    document.getElementById('modal-prompt').classList.add('active');
+    setTimeout(() => {
+      input.focus();
+      input.select();
+    }, 150);
+  });
+}
+
+// --- FUNÇÃO PARA ATIVAR/DESATIVAR MODO CONTÍNUO ---
+function handleToggleContinuousScan() {
+  appState.continuousScan = !appState.continuousScan;
+  const btn = document.getElementById('btn-scanner-continuous');
+  if (appState.continuousScan) {
+    btn.classList.add('active');
+    showToast('Modo Contínuo Ativado', 'success');
+  } else {
+    btn.classList.remove('active');
+    showToast('Modo Contínuo Desativado', 'info');
+  }
+}
+
+// --- COMPARTILHAMENTO DE LISTA ---
+function shareActiveShoppingList() {
+  if (!appState.activeList || appState.activeList.items.length === 0) {
+    showToast('A lista de compras está vazia.', 'danger');
+    return;
+  }
+
+  const list = appState.activeList;
+  
+  // Formata a mensagem
+  let text = `🛒 *Lista de Compras: ${list.name}*\n`;
+  text += `_Gerada por Klif Scan_\n\n`;
+
+  // Agrupa por categoria
+  const groups = {};
+  list.items.forEach(item => {
+    const cat = item.category || 'Outros';
+    if (!groups[cat]) groups[cat] = [];
+    groups[cat].push(item);
+  });
+
+  Object.keys(groups).sort().forEach(category => {
+    text += `*${category.toUpperCase()}*\n`;
+    groups[category].forEach(item => {
+      const checkEmoji = item.checked ? '🟢' : '⚪';
+      const priceText = item.price > 0 ? `(R$ ${item.price.toFixed(2)} un)` : '(R$ pendente)';
+      text += `${checkEmoji} ${item.quantity}x ${item.name} ${priceText}\n`;
+    });
+    text += `\n`;
+  });
+
+  const total = list.items.reduce((sum, item) => sum + (item.price * item.quantity), 0);
+  const checkedCount = list.items.filter(i => i.checked).length;
+  text += `*Resumo da Compra:*\n`;
+  text += `- No carrinho: ${checkedCount} de ${list.items.length} itens\n`;
+  text += `- *Total Estimado: R$ ${total.toFixed(2)}*\n`;
+
+  // Tenta compartilhar nativamente se suportado
+  if (navigator.share) {
+    navigator.share({
+      title: `Lista: ${list.name}`,
+      text: text
+    })
+    .catch((err) => console.log('Compartilhamento cancelado ou indisponível:', err));
+  } else {
+    // Redireciona para o WhatsApp
+    const encodedText = encodeURIComponent(text);
+    const whatsappUrl = `https://api.whatsapp.com/send?text=${encodedText}`;
+    window.open(whatsappUrl, '_blank');
+  }
+}
+
+// --- HISTÓRICO DE PREÇOS ---
+async function getProductPriceHistory(barcode) {
+  try {
+    const allLists = await getAllShoppingLists();
+    const completedLists = allLists.filter(l => l.completed);
+    const history = [];
+
+    completedLists.forEach(list => {
+      const foundItem = list.items.find(item => item.barcode === barcode);
+      if (foundItem && foundItem.price > 0) {
+        history.push({
+          date: list.date || list.id,
+          listName: list.name,
+          price: foundItem.price
+        });
+      }
+    });
+
+    history.sort((a, b) => b.date - a.date);
+    return history;
+  } catch (err) {
+    console.error('Erro ao ler histórico de preços:', err);
+    return [];
+  }
+}
+
+async function renderPriceHistory(barcode) {
+  const container = document.getElementById('product-price-history-section');
+  const listContainer = document.getElementById('product-price-history-list');
+
+  container.style.display = 'none';
+  listContainer.innerHTML = '';
+
+  if (!barcode) return;
+
+  const history = await getProductPriceHistory(barcode);
+  if (history.length === 0) return;
+
+  container.style.display = 'block';
+
+  // Renderiza no máximo 4 registros passados
+  const maxHistory = history.slice(0, 4);
+
+  maxHistory.forEach((record, index) => {
+    const itemEl = document.createElement('div');
+    itemEl.className = 'price-history-item';
+
+    const dateStr = new Date(record.date).toLocaleDateString('pt-BR', {
+      day: '2-digit',
+      month: '2-digit',
+      year: '2-digit'
+    });
+
+    // Calcula tendência em relação ao item subsequente (mais antigo)
+    let trendHtml = '';
+    const nextOlderRecord = history[index + 1];
+    if (nextOlderRecord) {
+      const diff = record.price - nextOlderRecord.price;
+      if (diff > 0) {
+        const pct = ((diff / nextOlderRecord.price) * 100).toFixed(0);
+        trendHtml = `<span class="price-trend up">▲ +${pct}%</span>`;
+      } else if (diff < 0) {
+        const pct = ((Math.abs(diff) / nextOlderRecord.price) * 100).toFixed(0);
+        trendHtml = `<span class="price-trend down">▼ -${pct}%</span>`;
+      } else {
+        trendHtml = `<span class="price-trend equal">=</span>`;
+      }
+    }
+
+    itemEl.innerHTML = `
+      <div>
+        <span class="price-history-date">${dateStr}</span>
+        <span style="font-size: 10px; color: var(--text-muted); display: block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 130px;">${record.listName}</span>
+      </div>
+      <div class="price-history-value-container">
+        <span class="price-history-val">R$ ${record.price.toFixed(2)}</span>
+        ${trendHtml}
+      </div>
+    `;
+
+    listContainer.appendChild(itemEl);
+  });
 }
