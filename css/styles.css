@@ -1087,6 +1087,15 @@ select.input-control {
   z-index: 306;
 }
 
+.scanner-subhint {
+  display: block;
+  font-size: 11px;
+  color: rgba(255, 255, 255, 0.6);
+  margin-top: 6px;
+  font-weight: normal;
+  line-height: 1.4;
+}
+
 /* --- TOAST NOTIFICATIONS --- */
 .toast-container {
   position: fixed;

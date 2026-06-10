@@ -62,10 +62,14 @@ export async function startScanner(elementId, onScanSuccess, onScanError = null,
       };
     },
     formatsToSupport: formats,
-    // Restrições de resolução HD e direcionamento de ID da câmera
+    useBarCodeDetectorIfSupported: true, // Usa o detector nativo se disponível (Chrome/Safari experimental)
+    experimentalFeatures: {
+      useBarCodeDetectorIfSupported: true
+    },
+    // Restrições de resolução HD equilibradas para performance (evita Full HD pesado)
     videoConstraints: {
-      width: { min: 640, ideal: 1280, max: 1920 },
-      height: { min: 480, ideal: 720, max: 1080 },
+      width: { min: 640, ideal: 1280, max: 1280 },
+      height: { min: 480, ideal: 720, max: 720 },
       deviceId: preferredCameraId ? { exact: preferredCameraId } : undefined,
       facingMode: preferredCameraId ? undefined : 'environment'
     }

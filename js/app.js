@@ -675,6 +675,12 @@ async function handleDecodedBarcode(barcode) {
     renderActiveList();
   } else {
     // Produto não encontrado localmente
+    const wantToAdd = confirm(`Produto com código ${barcode} não está cadastrado. Deseja adicioná-lo?`);
+    if (!wantToAdd) {
+      showToast('Cadastro cancelado pelo usuário.', 'info');
+      return;
+    }
+
     appState.tempBarcode = barcode;
     appState.tempQty = 1;
     document.getElementById('scan-qty-val').textContent = 1;
