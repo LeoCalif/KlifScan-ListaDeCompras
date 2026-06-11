@@ -43,13 +43,14 @@ self.addEventListener('activate', (event) => {
 self.addEventListener('fetch', (event) => {
   const requestUrl = new URL(event.request.url);
 
-  // Não cacheia requisições de APIs externas (Open Facts e Barcode Lookup)
+  // Não cacheia requisições de APIs externas (Open Facts, Barcode Lookup e UPCitemdb)
   if (
     requestUrl.hostname.includes('openfoodfacts.org') ||
     requestUrl.hostname.includes('openbeautyfacts.org') ||
     requestUrl.hostname.includes('openproductsfacts.org') ||
     requestUrl.hostname.includes('openpetfoodfacts.org') ||
-    requestUrl.hostname.includes('barcodelookup.com')
+    requestUrl.hostname.includes('barcodelookup.com') ||
+    requestUrl.hostname.includes('upcitemdb.com')
   ) {
     return; // Deixa o fetch acontecer normalmente da rede
   }

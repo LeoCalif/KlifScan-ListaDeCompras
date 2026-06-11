@@ -140,7 +140,14 @@ export async function fetchProductFromAPI(barcode) {
     return barcodeLookupResult;
   }
 
-  // Se a Barcode Lookup também falhou, mas tínhamos um matchedResult parcial no Open Facts,
+  // Se a Barcode Lookup também falhou, tenta a API UPCitemdb como fallback secundário
+  console.log(`Produto ${cleanBarcode} não encontrado na Barcode Lookup. Consultando UPCitemdb...`);
+  const upcItemDbResult = await fetchFromUPCitemdb(cleanBarcode);
+  if (upcItemDbResult) {
+    return upcItemDbResult;
+  }
+
+  // Se a UPCitemdb também falhou, mas tínhamos um matchedResult parcial no Open Facts,
   // retorna o produto com nome desconhecido como última alternativa
   if (matchedResult) {
     const p = matchedResult.product;
@@ -217,6 +224,54 @@ async function fetchFromBarcodeLookup(barcode) {
     }
   } catch (error) {
     console.error('Erro ao consultar Barcode Lookup:', error);
+  }
+
+  return null;
+}
+
+/**
+ * Busca informações do produto pela API trial pública do UPCitemdb (serviço de redundância gratuito sem chave).
+ * @param {string} barcode - Código de barras
+ * @returns {Promise<Object|null>} Retorna dados estruturados do produto ou null se não encontrado
+ */
+async function fetchFromUPCitemdb(barcode) {
+  const url = `https://api.upcitemdb.com/prod/trial/lookup?upc=${barcode}`;
+
+  try {
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 6000); // 6 segundos de timeout
+
+    const response = await fetch(url, {
+      signal: controller.signal
+    });
+
+    clearTimeout(timeoutId);
+
+    if (!response.ok) {
+      console.warn(`UPCitemdb retornou status: ${response.status}`);
+      return null;
+    }
+
+    const data = await response.json();
+    if (data && Array.isArray(data.items) && data.items.length > 0) {
+      const item = data.items[0];
+      
+      const name = item.title || '';
+      const brand = item.brand || item.publisher || '';
+      const image = Array.isArray(item.images) && item.images.length > 0 ? item.images[0] : '';
+      const category = mapCategory(item.category || '');
+
+      return {
+        barcode: barcode,
+        name: name.trim() || 'Produto Desconhecido',
+        brand: brand.trim(),
+        category: category,
+        image: image,
+        price: 0
+      };
+    }
+  } catch (error) {
+    console.error('Erro ao consultar UPCitemdb:', error);
   }
 
   return null;
