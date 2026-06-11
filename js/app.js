@@ -711,52 +711,69 @@ async function handleDecodedBarcode(barcode) {
     await addItemToActiveShoppingList(localProduct, 1);
     showToast(`Adicionado: ${localProduct.name} (+1)`, 'success');
     renderActiveList();
-  } else {
-    // Produto não encontrado localmente
-    if (appState.continuousScan) {
-      // Modo contínuo: não interrompe. Adiciona um produto temporário.
-      const tempProduct = {
-        barcode: barcode,
-        name: `Prod não cadastrado (${barcode})`,
-        brand: 'Pendente',
-        category: 'Outros',
-        price: 0,
-        image: ''
-      };
-      await saveProduct(tempProduct);
-      await addItemToActiveShoppingList(tempProduct, 1);
-      showToast(`Adicionado pendente (${barcode})`, 'warning');
-      renderActiveList();
-    } else {
-      // Modo normal: pergunta se quer cadastrar
-      const wantToAdd = await showCustomConfirm('Produto não cadastrado', `O produto com código ${barcode} não está cadastrado. Deseja adicioná-lo?`);
-      if (!wantToAdd) {
-        showToast('Cadastro cancelado pelo usuário.', 'info');
-        return;
-      }
+    return;
+  }
 
-      appState.tempBarcode = barcode;
-      appState.tempQty = 1;
-      document.getElementById('scan-qty-val').textContent = 1;
-
-      // Se estiver online e a busca na API estiver habilitada
-      if (navigator.onLine && appState.apiEnabled) {
-        showToast('Buscando dados do produto na nuvem...', 'info');
-        
-        const apiProduct = await fetchProductFromAPI(barcode);
-        if (apiProduct) {
-          // Abre o modal pré-preenchido
-          await openProductModalWithData(apiProduct, true);
-        } else {
-          // Não achou na API externa, abre em branco com código preenchido
-          await openProductModalWithData({ barcode: barcode, name: '', brand: '', category: 'Mercearia', price: 0 }, true);
-          showToast('Produto não encontrado na nuvem. Insira os dados.', 'info');
-        }
-      } else {
-        // Offline ou API desativada
-        await openProductModalWithData({ barcode: barcode, name: '', brand: '', category: 'Mercearia', price: 0 }, true);
+  // Produto não encontrado localmente
+  if (appState.continuousScan) {
+    // Modo contínuo: não interrompe. Busca na nuvem se puder, senão adiciona temporário.
+    let tempProduct = {
+      barcode: barcode,
+      name: `Prod não cadastrado (${barcode})`,
+      brand: 'Pendente',
+      category: 'Outros',
+      price: 0,
+      image: ''
+    };
+    
+    if (navigator.onLine && appState.apiEnabled) {
+      const apiProduct = await fetchProductFromAPI(barcode);
+      if (apiProduct) {
+        tempProduct = apiProduct;
       }
     }
+    
+    await saveProduct(tempProduct);
+    await addItemToActiveShoppingList(tempProduct, 1);
+    showToast(
+      tempProduct.name.startsWith('Prod não cadastrado') 
+        ? `Adicionado pendente (${barcode})` 
+        : `Adicionado: ${tempProduct.name} (+1)`, 
+      tempProduct.name.startsWith('Prod não cadastrado') ? 'warning' : 'success'
+    );
+    renderActiveList();
+    return;
+  }
+
+  // Modo normal: busca na nuvem silenciosamente primeiro
+  let apiProduct = null;
+  if (navigator.onLine && appState.apiEnabled) {
+    showToast('Buscando dados do produto na nuvem...', 'info');
+    apiProduct = await fetchProductFromAPI(barcode);
+  }
+
+  if (apiProduct) {
+    // Encontrou na nuvem! Abre o modal pré-preenchido para confirmar diretamente
+    appState.tempBarcode = barcode;
+    appState.tempQty = 1;
+    document.getElementById('scan-qty-val').textContent = 1;
+    await openProductModalWithData(apiProduct, true);
+  } else {
+    // Não encontrou na nuvem (ou está offline/API desativada)
+    // Apenas agora pergunta se quer cadastrar manualmente
+    const wantToAdd = await showCustomConfirm(
+      'Produto não cadastrado', 
+      `O produto com código ${barcode} não foi localizado. Deseja cadastrá-lo manualmente?`
+    );
+    if (!wantToAdd) {
+      showToast('Cadastro cancelado pelo usuário.', 'info');
+      return;
+    }
+
+    appState.tempBarcode = barcode;
+    appState.tempQty = 1;
+    document.getElementById('scan-qty-val').textContent = 1;
+    await openProductModalWithData({ barcode: barcode, name: '', brand: '', category: 'Mercearia', price: 0 }, true);
   }
 }
 

@@ -66,10 +66,7 @@ export async function fetchProductFromAPI(barcode) {
       const timeoutId = setTimeout(() => controller.abort(), 5000); // 5 segundos de timeout por API
 
       const response = await fetch(api.url, {
-        signal: controller.signal,
-        headers: {
-          'User-Agent': 'BarcodeShoppingListPWA - WebApp - Version 1.0'
-        }
+        signal: controller.signal
       });
 
       clearTimeout(timeoutId);
