@@ -8,7 +8,12 @@ import {
   deleteShoppingList,
   getAllShoppingLists,
   getSetting,
-  setSetting
+  setSetting,
+  getStockItem,
+  saveStockItem,
+  getAllStockItems,
+  deleteStockItem,
+  clearAllProducts
 } from './db.js';
 
 import { fetchProductFromAPI } from './api.js';
@@ -20,7 +25,7 @@ import {
   toggleTorch
 } from './scanner.js';
 
-import { initAuth } from './auth.js';
+import { initAuth, getLoggedUser, logoutUser } from './auth.js';
 
 // --- ESTADO GLOBAL DO APLICATIVO ---
 let appState = {
@@ -34,7 +39,8 @@ let appState = {
   continuousScan: false, // Modo de escaneamento contínuo
   lastScannedBarcode: null, // Evitar bipes múltiplos em seguida no modo contínuo
   lastScanTimestamp: 0,
-  cameras: []           // Câmeras disponíveis
+  cameras: [],          // Câmeras disponíveis
+  scannerMode: 'shopping' // 'shopping' (carrinho) ou 'consume' (baixa no estoque)
 };
 
 // --- INICIALIZAÇÃO DO APP ---
@@ -47,13 +53,25 @@ document.addEventListener('DOMContentLoaded', async () => {
 
   // Inicializa o controle de acesso local
   initAuth(async () => {
+    // Inicializa perfil do usuário autenticado pelo Google
+    setupUserProfile();
+
+
+
     // 2. Carrega configurações salvas no DB local
     appState.vibrateEnabled = await getSetting('vibrate_enabled', true);
-    appState.apiEnabled = await getSetting('api_enabled', true);
+    
+    const apiOpenfactsEnabled = await getSetting('api_openfacts_enabled', true);
+    const apiBarcodelookupEnabled = await getSetting('api_barcodelookup_enabled', true);
+    const apiUpcitemdbEnabled = await getSetting('api_upcitemdb_enabled', true);
+
+    appState.apiEnabled = apiOpenfactsEnabled || apiBarcodelookupEnabled || apiUpcitemdbEnabled;
     
     // Atualiza checkboxes de configuração com os estados corretos
     document.getElementById('setting-vibrate').checked = appState.vibrateEnabled;
-    document.getElementById('setting-api').checked = appState.apiEnabled;
+    document.getElementById('setting-api-openfacts').checked = apiOpenfactsEnabled;
+    document.getElementById('setting-api-barcodelookup').checked = apiBarcodelookupEnabled;
+    document.getElementById('setting-api-upcitemdb').checked = apiUpcitemdbEnabled;
 
     // 3. Verifica se há uma compra ativa salva anteriormente
     const activeListId = await getSetting('active_list_id');
@@ -199,18 +217,46 @@ function setupEventListeners() {
     showToast('Preferência de vibração atualizada!', 'success');
   });
 
-  document.getElementById('setting-api').addEventListener('change', (e) => {
-    appState.apiEnabled = e.target.checked;
-    setSetting('api_enabled', e.target.checked);
-    showToast('Preferência de API externa atualizada!', 'success');
+  // Configuração de abertura do modal de APIs
+  document.getElementById('btn-api-config-trigger').addEventListener('click', () => {
+    document.getElementById('modal-api-settings').classList.add('active');
   });
 
-  // 6. Backup de Dados (Exportar / Importar)
+  // Atualização das configurações de APIs nos Checkboxes do modal
+  const updateApiState = async () => {
+    const ofE = document.getElementById('setting-api-openfacts').checked;
+    const blE = document.getElementById('setting-api-barcodelookup').checked;
+    const upcE = document.getElementById('setting-api-upcitemdb').checked;
+    
+    appState.apiEnabled = ofE || blE || upcE;
+    
+    await setSetting('api_openfacts_enabled', ofE);
+    await setSetting('api_barcodelookup_enabled', blE);
+    await setSetting('api_upcitemdb_enabled', upcE);
+  };
+
+  document.getElementById('setting-api-openfacts').addEventListener('change', async () => {
+    await updateApiState();
+    showToast('Fonte Open Facts atualizada!', 'success');
+  });
+
+  document.getElementById('setting-api-barcodelookup').addEventListener('change', async () => {
+    await updateApiState();
+    showToast('Fonte Barcode Lookup atualizada!', 'success');
+  });
+
+  document.getElementById('setting-api-upcitemdb').addEventListener('change', async () => {
+    await updateApiState();
+    showToast('Fonte UPCitemdb atualizada!', 'success');
+  });
+
+  // 6. Backup de Dados (Exportar / Importar / Catálogo)
   document.getElementById('btn-export-db').addEventListener('click', exportDatabase);
   document.getElementById('btn-import-db-trigger').addEventListener('click', () => {
     document.getElementById('import-db-file').click();
   });
   document.getElementById('import-db-file').addEventListener('change', importDatabase);
+  document.getElementById('btn-clear-products').addEventListener('click', handleClearProducts);
 
   // 7. Scanner Câmera Triggers
   document.getElementById('btn-scan-trigger').addEventListener('click', openScannerOverlay);
@@ -249,6 +295,7 @@ function setupEventListeners() {
   // 11. Modal de Histórico
   document.getElementById('btn-hist-delete').addEventListener('click', deleteHistoryItem);
   document.getElementById('btn-hist-clone').addEventListener('click', cloneHistoryList);
+  document.getElementById('btn-hist-stock').addEventListener('click', handleAddHistoryToStock);
 
   // Quantidade temporária no modal do scanner
   document.getElementById('scan-qty-inc').addEventListener('click', () => {
@@ -260,6 +307,28 @@ function setupEventListeners() {
       appState.tempQty--;
       document.getElementById('scan-qty-val').textContent = appState.tempQty;
     }
+  });
+
+  // 12. Botão de Logout
+  const btnLogout = document.getElementById('btn-logout');
+  if (btnLogout) {
+    btnLogout.addEventListener('click', async () => {
+      const ok = await showCustomConfirm('Sair da Conta', 'Deseja realmente sair da sua conta Google e bloquear o aplicativo?');
+      if (ok) {
+        logoutUser();
+      }
+    });
+  }
+
+  // 13. Dispensa (Estoque)
+  document.getElementById('dispensa-search-input').addEventListener('input', (e) => {
+    renderDispensa(e.target.value);
+  });
+  document.getElementById('btn-dispensa-scan').addEventListener('click', () => {
+    openScannerOverlay('consume');
+  });
+  document.getElementById('btn-dispensa-db').addEventListener('click', () => {
+    switchTab('products');
   });
 }
 
@@ -289,6 +358,8 @@ function switchTab(tabName) {
     renderHistory();
   } else if (tabName === 'products') {
     renderProductDatabase();
+  } else if (tabName === 'dispensa') {
+    renderDispensa();
   }
 }
 
@@ -572,10 +643,18 @@ async function removeItemFromActiveList(barcode) {
 
 // --- FLUXO DO SCANNER DE CÓDIGO DE BARRAS ---
 
-async function openScannerOverlay() {
-  // O scanner exige uma compra ativa! Se não houver, inicia uma automaticamente.
-  if (!appState.activeList) {
+async function openScannerOverlay(mode = 'shopping') {
+  appState.scannerMode = mode;
+
+  // O scanner exige uma compra ativa apenas no modo compras!
+  if (mode === 'shopping' && !appState.activeList) {
     await startNewShoppingList();
+  }
+
+  // Atualiza título da overlay do scanner com base no modo
+  const scannerTitleEl = document.querySelector('.scanner-title');
+  if (scannerTitleEl) {
+    scannerTitleEl.textContent = mode === 'consume' ? 'Consumir Item (Dar Baixa)' : 'Escanear Produto';
   }
 
   const overlay = document.getElementById('scanner-container');
@@ -704,6 +783,40 @@ async function handleDecodedBarcode(barcode) {
     try { navigator.vibrate(80); } catch (e) {}
   }
 
+  // --- MODO CONSUMO (DAR BAIXA NA DISPENSA) ---
+  if (appState.scannerMode === 'consume') {
+    const stockItem = await getStockItem(barcode);
+    if (stockItem) {
+      if (stockItem.quantity > 0) {
+        stockItem.quantity--;
+        await saveStockItem(stockItem);
+        showToast(`Consumido: ${stockItem.name} (-1). Restam: ${stockItem.quantity}`, 'success');
+      } else {
+        showToast(`Aviso: ${stockItem.name} já está com estoque zerado (0).`, 'warning');
+      }
+      if (appState.currentTab === 'dispensa') {
+        renderDispensa();
+      }
+    } else {
+      // Tenta achar dados do produto para exibir nome amigável no aviso
+      const localProduct = await getProduct(barcode);
+      let prodName = `Código ${barcode}`;
+      if (localProduct) {
+        prodName = localProduct.name;
+      } else if (navigator.onLine && appState.apiEnabled) {
+        const apiProduct = await fetchProductFromAPI(barcode);
+        if (apiProduct) {
+          await saveProduct(apiProduct); // Cache automático!
+          prodName = apiProduct.name;
+        }
+      }
+      showToast(`O produto "${prodName}" não foi localizado na sua Dispensa.`, 'danger');
+    }
+    return;
+  }
+
+  // --- MODO COMPRAS (PADRÃO) ---
+
   // Verifica se o produto já existe no banco de dados local
   const localProduct = await getProduct(barcode);
   if (localProduct) {
@@ -753,6 +866,9 @@ async function handleDecodedBarcode(barcode) {
   }
 
   if (apiProduct) {
+    // Cache automático de qualquer produto retornado com sucesso pela API externa
+    await saveProduct(apiProduct);
+
     // Encontrou na nuvem! Abre o modal pré-preenchido para confirmar diretamente
     appState.tempBarcode = barcode;
     appState.tempQty = 1;
@@ -913,13 +1029,17 @@ async function saveProductFromModal() {
   const price = parseFloat(document.getElementById('prod-price').value) || 0;
   const image = document.getElementById('prod-image').value;
 
+  const existingProduct = await getProduct(barcode);
+  const source = existingProduct && existingProduct.source ? existingProduct.source : 'Manual';
+
   const product = {
     barcode,
     name,
     brand,
     category,
     price,
-    image
+    image,
+    source
   };
 
   // Salva no banco de dados local (IndexedDB)
@@ -1094,7 +1214,10 @@ async function renderProductDatabase(searchQuery = '') {
           <span style="color: var(--accent-cyan); font-weight: 600;">${priceText}</span>
         </div>
       </div>
-      <div style="font-size: 11px; color: var(--text-muted); font-family: monospace;">${p.barcode}</div>
+      <div style="text-align: right; flex-shrink: 0; display: flex; flex-direction: column; align-items: flex-end; gap: 4px;">
+        <span style="font-size: 11px; color: var(--text-muted); font-family: monospace;">${p.barcode}</span>
+        <span style="font-size: 9px; padding: 2px 6px; border-radius: 4px; background: rgba(139, 92, 246, 0.1); color: var(--accent-violet); border: 1px solid rgba(139, 92, 246, 0.2); font-weight: 600;">${p.source || 'Manual'}</span>
+      </div>
     `;
 
     card.addEventListener('click', () => {
@@ -1104,6 +1227,8 @@ async function renderProductDatabase(searchQuery = '') {
     grid.appendChild(card);
   });
 }
+
+
 
 // --- ABA E HISTÓRICO DE COMPRAS ---
 
@@ -1172,6 +1297,20 @@ async function openHistoryDetailModal(listId) {
   });
   document.getElementById('hist-detail-date').textContent = dateStr;
   document.getElementById('hist-detail-total').textContent = `R$ ${list.total.toFixed(2)}`;
+
+  // Configura estado do botão de enviar para a dispensa
+  const btnStock = document.getElementById('btn-hist-stock');
+  if (btnStock) {
+    if (list.addedToStock) {
+      btnStock.textContent = 'Estocado';
+      btnStock.disabled = true;
+      btnStock.style.opacity = '0.5';
+    } else {
+      btnStock.textContent = 'Estocar';
+      btnStock.disabled = false;
+      btnStock.style.opacity = '1';
+    }
+  }
 
   const itemsContainer = document.getElementById('hist-detail-items');
   itemsContainer.innerHTML = '';
@@ -1254,6 +1393,29 @@ async function cloneHistoryList() {
   switchTab('shopping');
 }
 
+// Limpa todos os produtos salvos no banco local
+async function handleClearProducts() {
+  const ok = await showCustomConfirm(
+    'Limpar Banco de Produtos',
+    'Tem certeza de que deseja apagar TODOS os produtos salvos no seu banco de dados local? Essa ação não pode ser desfeita, mas não afetará suas listas de compras e estoque.'
+  );
+
+  if (ok) {
+    try {
+      await clearAllProducts();
+      showToast('Banco de produtos limpo com sucesso!', 'success');
+      
+      // Atualiza a visualização caso esteja na aba de produtos
+      if (appState.currentTab === 'products') {
+        renderProductDatabase();
+      }
+    } catch (error) {
+      console.error(error);
+      showToast('Erro ao limpar banco de produtos.', 'danger');
+    }
+  }
+}
+
 // --- IMPORTAÇÃO / EXPORTAÇÃO JSON ---
 
 // Exporta banco de dados IndexedDB completo para JSON
@@ -1263,12 +1425,14 @@ async function exportDatabase() {
   try {
     const products = await getAllProducts();
     const lists = await getAllShoppingLists();
+    const stock = await getAllStockItems();
     
     const backupData = {
-      version: 1,
+      version: 2,
       exportedAt: Date.now(),
       products,
-      shoppingLists: lists
+      shoppingLists: lists,
+      stock
     };
 
     const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(backupData, null, 2));
@@ -1315,6 +1479,14 @@ async function importDatabase(event) {
         await saveShoppingList(list);
       }
 
+      // Importa estoque/dispensa se houver no JSON
+      if (data.stock && Array.isArray(data.stock)) {
+        showToast('Importando dispensa...', 'info');
+        for (const item of data.stock) {
+          await saveStockItem(item);
+        }
+      }
+
       showToast('Importação concluída com sucesso!', 'success');
       
       // Reseta input de file
@@ -1332,6 +1504,8 @@ async function importDatabase(event) {
         renderProductDatabase();
       } else if (appState.currentTab === 'history') {
         renderHistory();
+      } else if (appState.currentTab === 'dispensa') {
+        renderDispensa();
       }
     } catch (err) {
       console.error(err);
@@ -1656,4 +1830,207 @@ async function renderPriceHistory(barcode) {
 
     listContainer.appendChild(itemEl);
   });
+}
+
+// --- CONFIGURAÇÃO E EXIBIÇÃO DO PERFIL DO USUÁRIO ---
+function setupUserProfile() {
+  const user = getLoggedUser();
+  const profileCard = document.getElementById('user-profile-card');
+  if (user && profileCard) {
+    const picEl = document.getElementById('user-profile-pic');
+    const nameEl = document.getElementById('user-profile-name');
+    const emailEl = document.getElementById('user-profile-email');
+    
+    if (picEl) picEl.src = user.picture || '';
+    if (nameEl) nameEl.textContent = user.name || 'Usuário Klif';
+    if (emailEl) emailEl.textContent = user.email || '';
+    
+    profileCard.style.display = 'flex';
+  }
+}
+
+// --- FLUXO DE CONTROLE DE DISPENSA / ESTOQUE DOMÉSTICO ---
+
+// Envia a lista do histórico selecionada para a Dispensa
+async function handleAddHistoryToStock() {
+  const id = historyDetailListId;
+  if (!id) return;
+
+  const list = await getShoppingList(id);
+  if (!list) return;
+
+  if (list.addedToStock) {
+    showToast('Esta lista de compras já foi enviada para a Dispensa.', 'info');
+    return;
+  }
+
+  const ok = await showCustomConfirm('Enviar para Dispensa', 'Deseja adicionar todos os itens desta compra à sua Dispensa?');
+  if (!ok) return;
+
+  try {
+    for (const item of list.items) {
+      const stockItem = await getStockItem(item.barcode);
+      if (stockItem) {
+        stockItem.quantity += item.quantity;
+        await saveStockItem(stockItem);
+      } else {
+        await saveStockItem({
+          barcode: item.barcode,
+          name: item.name,
+          brand: item.brand,
+          category: item.category,
+          image: item.image,
+          quantity: item.quantity
+        });
+      }
+    }
+
+    list.addedToStock = true;
+    await saveShoppingList(list);
+
+    showToast('Produtos adicionados à sua Dispensa com sucesso!', 'success');
+
+    // Desativa botão no modal
+    const btnStock = document.getElementById('btn-hist-stock');
+    if (btnStock) {
+      btnStock.textContent = 'Estocado';
+      btnStock.disabled = true;
+      btnStock.style.opacity = '0.5';
+    }
+
+    if (appState.currentTab === 'dispensa') {
+      renderDispensa();
+    }
+  } catch (err) {
+    console.error('Erro ao enviar compra para dispensa:', err);
+    showToast('Ocorreu um erro ao estocar os itens.', 'danger');
+  }
+}
+
+// Desenha a aba Dispensa na tela
+async function renderDispensa(searchQuery = '') {
+  const emptyState = document.getElementById('dispensa-empty-state');
+  const gridContainer = document.getElementById('dispensa-grid-container');
+
+  if (!gridContainer || !emptyState) return;
+
+  gridContainer.innerHTML = '';
+  
+  try {
+    const stockItems = await getAllStockItems();
+    
+    // Filtra pela busca (Nome, Marca ou Categoria)
+    const query = searchQuery.trim().toLowerCase();
+    const filteredItems = stockItems.filter(item => {
+      return !query || 
+             (item.name || '').toLowerCase().includes(query) ||
+             (item.brand || '').toLowerCase().includes(query) ||
+             (item.category || '').toLowerCase().includes(query);
+    });
+
+    if (filteredItems.length === 0) {
+      emptyState.style.display = 'block';
+      return;
+    }
+
+    emptyState.style.display = 'none';
+
+    // Renderiza cada item do estoque
+    filteredItems.forEach(item => {
+      const card = document.createElement('div');
+      card.className = 'product-card';
+      card.style.display = 'flex';
+      card.style.justifyContent = 'space-between';
+      card.style.alignItems = 'center';
+      card.style.padding = '12px';
+      
+      const imageHtml = item.image
+        ? `<img src="${item.image}" class="item-image" style="width: 48px; height: 48px;" alt="${item.name}">`
+        : `<div class="item-image" style="width: 48px; height: 48px;"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M20.25 7.5l-.625 10.632a2.25 2.25 0 01-2.247 2.118H6.622a2.25 2.25 0 01-2.247-2.118L3.75 7.5M10 11.25h4M3.375 7.5h17.25c.621 0 1.125-.504 1.125-1.125v-1.5c0-.621-.504-1.125-1.125-1.125H3.375c-.621 0-1.125.504-1.125 1.125v1.5c0 .621.504 1.125 1.125 1.125z"/></svg></div>`;
+
+      // Destaca estoque zerado se a quantidade for menor ou igual a 0
+      const isZero = item.quantity <= 0;
+      const qtyStyle = isZero 
+        ? "color: var(--color-danger); text-shadow: 0 0 6px var(--color-danger-glow);" 
+        : "color: var(--accent-cyan); text-shadow: 0 0 6px var(--accent-cyan-glow);";
+
+      card.innerHTML = `
+        <div style="display: flex; align-items: center; gap: 12px; min-width: 0; flex: 1;">
+          ${imageHtml}
+          <div style="min-width: 0; flex: 1;">
+            <div style="font-family: var(--font-title); font-size: 14px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">${item.name}</div>
+            <div style="font-size: 11px; color: var(--text-secondary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">
+              ${item.brand || 'Sem marca'} • <span style="color: var(--accent-violet);">${item.category || 'Outros'}</span>
+            </div>
+          </div>
+        </div>
+        
+        <div style="display: flex; align-items: center; gap: 12px;">
+          <!-- Controles de Quantidade -->
+          <div class="qty-controls">
+            <button class="qty-btn btn-stock-dec" data-barcode="${item.barcode}">
+              <svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" d="M19.5 12h-15"/></svg>
+            </button>
+            <span class="qty-val" style="font-size: 15px; font-weight: 800; ${qtyStyle}">${item.quantity}</span>
+            <button class="qty-btn btn-stock-inc" data-barcode="${item.barcode}">
+              <svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" d="M12 4.5v15m7.5-7.5h-15"/></svg>
+            </button>
+          </div>
+          
+          <button class="btn-delete btn-stock-delete" data-barcode="${item.barcode}" title="Remover da Dispensa">
+            <svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" d="M14.74 9l-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 01-2.244 2.077H8.084a2.25 2.25 0 01-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 00-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 013.478-.397m7.5 0v-.916c0-1.18-.91-2.164-2.09-2.201a51.964 51.964 0 00-3.32 0c-1.18.037-2.09 1.022-2.09 2.201v.916m7.5 0a48.667 48.667 0 00-7.5 0"/></svg>
+          </button>
+        </div>
+      `;
+
+      // Evento de diminuir quantidade
+      card.querySelector('.btn-stock-dec').addEventListener('click', (e) => {
+        e.stopPropagation();
+        updateStockItemQty(item.barcode, -1);
+      });
+
+      // Evento de aumentar quantidade
+      card.querySelector('.btn-stock-inc').addEventListener('click', (e) => {
+        e.stopPropagation();
+        updateStockItemQty(item.barcode, 1);
+      });
+
+      // Evento de excluir item
+      card.querySelector('.btn-stock-delete').addEventListener('click', (e) => {
+        e.stopPropagation();
+        removeStockItem(item.barcode);
+      });
+
+      gridContainer.appendChild(card);
+    });
+  } catch (err) {
+    console.error('Erro ao renderizar dispensa:', err);
+    showToast('Falha ao ler dados da Dispensa.', 'danger');
+  }
+}
+
+// Atualiza a quantidade do item na dispensa manualmente
+async function updateStockItemQty(barcode, change) {
+  const item = await getStockItem(barcode);
+  if (!item) return;
+
+  const newQty = item.quantity + change;
+  if (newQty < 0) return; // Não permite estoque negativo
+
+  item.quantity = newQty;
+  await saveStockItem(item);
+  renderDispensa(document.getElementById('dispensa-search-input').value);
+}
+
+// Remove o item da dispensa completamente
+async function removeStockItem(barcode) {
+  const item = await getStockItem(barcode);
+  if (!item) return;
+
+  const ok = await showCustomConfirm('Remover da Dispensa', `Deseja realmente remover o produto "${item.name}" da sua Dispensa?`);
+  if (ok) {
+    await deleteStockItem(barcode);
+    showToast('Produto removido da dispensa.', 'info');
+    renderDispensa(document.getElementById('dispensa-search-input').value);
+  }
 }

@@ -1,5 +1,5 @@
 const DB_NAME = 'BarcodeShoppingListDB';
-const DB_VERSION = 1;
+const DB_VERSION = 2;
 
 let dbInstance = null;
 
@@ -37,6 +37,13 @@ export function getDB() {
       if (!db.objectStoreNames.contains('settings')) {
         db.createObjectStore('settings', { keyPath: 'key' });
       }
+
+      // Stock store (barcode is key)
+      if (!db.objectStoreNames.contains('stock')) {
+        const stockStore = db.createObjectStore('stock', { keyPath: 'barcode' });
+        stockStore.createIndex('name', 'name', { unique: false });
+        stockStore.createIndex('category', 'category', { unique: false });
+      }
     };
   });
 }
@@ -69,6 +76,7 @@ export async function saveProduct(product) {
       category: product.category || 'Outros',
       image: product.image || '',
       price: typeof product.price === 'number' ? product.price : 0,
+      source: product.source || 'Manual',
       lastUpdated: Date.now()
     };
 
@@ -183,6 +191,79 @@ export async function setSetting(key, value) {
     const request = store.put({ key, value });
 
     request.onsuccess = () => resolve(value);
+    request.onerror = () => reject(request.error);
+  });
+}
+
+// --- STOCK OPERATIONS ---
+
+export async function getStockItem(barcode) {
+  const db = await getDB();
+  return new Promise((resolve, reject) => {
+    const transaction = db.transaction('stock', 'readonly');
+    const store = transaction.objectStore('stock');
+    const request = store.get(barcode);
+
+    request.onsuccess = () => resolve(request.result || null);
+    request.onerror = () => reject(request.error);
+  });
+}
+
+export async function saveStockItem(item) {
+  const db = await getDB();
+  return new Promise((resolve, reject) => {
+    const transaction = db.transaction('stock', 'readwrite');
+    const store = transaction.objectStore('stock');
+    
+    const updatedItem = {
+      barcode: String(item.barcode),
+      name: item.name || 'Produto Sem Nome',
+      brand: item.brand || '',
+      category: item.category || 'Outros',
+      image: item.image || '',
+      quantity: typeof item.quantity === 'number' ? item.quantity : 0,
+      lastUpdated: Date.now()
+    };
+
+    const request = store.put(updatedItem);
+
+    request.onsuccess = () => resolve(updatedItem);
+    request.onerror = () => reject(request.error);
+  });
+}
+
+export async function getAllStockItems() {
+  const db = await getDB();
+  return new Promise((resolve, reject) => {
+    const transaction = db.transaction('stock', 'readonly');
+    const store = transaction.objectStore('stock');
+    const request = store.getAll();
+
+    request.onsuccess = () => resolve(request.result || []);
+    request.onerror = () => reject(request.error);
+  });
+}
+
+export async function deleteStockItem(barcode) {
+  const db = await getDB();
+  return new Promise((resolve, reject) => {
+    const transaction = db.transaction('stock', 'readwrite');
+    const store = transaction.objectStore('stock');
+    const request = store.delete(barcode);
+
+    request.onsuccess = () => resolve(true);
+    request.onerror = () => reject(request.error);
+  });
+}
+
+export async function clearAllProducts() {
+  const db = await getDB();
+  return new Promise((resolve, reject) => {
+    const transaction = db.transaction('products', 'readwrite');
+    const store = transaction.objectStore('products');
+    const request = store.clear();
+
+    request.onsuccess = () => resolve(true);
     request.onerror = () => reject(request.error);
   });
 }

@@ -1,3 +1,5 @@
+import { getSetting } from './db.js';
+
 /**
  * Mapeia as categorias da API do Open Food Facts para categorias amigáveis do nosso sistema.
  * @param {string} categoriesText - Texto bruto de categorias da API
@@ -51,100 +53,113 @@ export async function fetchProductFromAPI(barcode) {
   const cleanBarcode = String(barcode).trim();
   if (!cleanBarcode) return null;
 
-  // Lista de APIs públicas (não exigem chave de acesso)
-  const apis = [
-    { url: `https://world.openfoodfacts.org/api/v2/product/${cleanBarcode}.json`, type: 'food' },
-    { url: `https://world.openbeautyfacts.org/api/v2/product/${cleanBarcode}.json`, type: 'beauty' },
-    { url: `https://world.openproductsfacts.org/api/v2/product/${cleanBarcode}.json`, type: 'products' },
-    { url: `https://world.openpetfoodfacts.org/api/v2/product/${cleanBarcode}.json`, type: 'pet' }
-  ];
-
-  // Executa as requisições em paralelo para máxima velocidade
-  const fetchPromises = apis.map(async (api) => {
-    try {
-      const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 5000); // 5 segundos de timeout por API
-
-      const response = await fetch(api.url, {
-        signal: controller.signal
-      });
-
-      clearTimeout(timeoutId);
-
-      if (!response.ok) return null;
-
-      const data = await response.json();
-      if (data && data.status === 1 && data.product) {
-        return { product: data.product, type: api.type };
-      }
-    } catch (e) {
-      // Ignora erro individual (offline ou timeout) para permitir que as outras resolvam
-    }
-    return null;
-  });
+  // Carrega as configurações de busca individuais
+  const openFactsEnabled = await getSetting('api_openfacts_enabled', true);
+  const barcodeLookupEnabled = await getSetting('api_barcodelookup_enabled', true);
+  const upcItemDbEnabled = await getSetting('api_upcitemdb_enabled', true);
 
   let matchedResult = null;
-  try {
-    const results = await Promise.all(fetchPromises);
-    
-    // Encontra o primeiro resultado não nulo retornado por alguma das APIs
-    matchedResult = results.find(r => r !== null);
 
-    if (matchedResult) {
-      const p = matchedResult.product;
-      // Nome do produto (tenta português, depois geral, depois inglês)
-      const name = p.product_name_pt || p.product_name || p.product_name_en || '';
+  if (openFactsEnabled) {
+    // Lista de APIs públicas (não exigem chave de acesso)
+    const apis = [
+      { url: `https://world.openfoodfacts.org/api/v2/product/${cleanBarcode}.json`, type: 'food' },
+      { url: `https://world.openbeautyfacts.org/api/v2/product/${cleanBarcode}.json`, type: 'beauty' },
+      { url: `https://world.openproductsfacts.org/api/v2/product/${cleanBarcode}.json`, type: 'products' },
+      { url: `https://world.openpetfoodfacts.org/api/v2/product/${cleanBarcode}.json`, type: 'pet' }
+    ];
 
-      // Se encontramos o nome nas APIs Open Facts, retorna diretamente
-      if (name.trim() !== '') {
-        const apiType = matchedResult.type;
-        const brand = p.brands ? p.brands.split(',')[0].trim() : '';
-        const image = p.image_front_url || p.image_url || '';
-        
-        // Mapeia categoria padrão com base na API que respondeu
-        let fallbackCat = 'Mercearia';
-        if (apiType === 'beauty') fallbackCat = 'Higiene e Beleza';
-        if (apiType === 'products') fallbackCat = 'Limpeza';
-        if (apiType === 'pet') fallbackCat = 'Pet Shop';
+    // Executa as requisições em paralelo para máxima velocidade
+    const fetchPromises = apis.map(async (api) => {
+      try {
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 5000); // 5 segundos de timeout por API
 
-        const category = mapCategory(p.categories || '', p.categories_tags || []);
-        
-        // Ajustes finos de categoria caso o mapeamento de texto retorne genérico
-        let finalCategory = category;
-        if (category === 'Mercearia') {
-          finalCategory = fallbackCat;
+        const response = await fetch(api.url, {
+          signal: controller.signal
+        });
+
+        clearTimeout(timeoutId);
+
+        if (!response.ok) return null;
+
+        const data = await response.json();
+        if (data && data.status === 1 && data.product) {
+          return { product: data.product, type: api.type };
         }
-
-        return {
-          barcode: cleanBarcode,
-          name: name.trim(),
-          brand: brand,
-          category: finalCategory,
-          image: image,
-          price: 0
-        };
+      } catch (e) {
+        // Ignora erro individual (offline ou timeout) para permitir que as outras resolvam
       }
+      return null;
+    });
+
+    try {
+      const results = await Promise.all(fetchPromises);
+      
+      // Encontra o primeiro resultado não nulo retornado por alguma das APIs
+      matchedResult = results.find(r => r !== null);
+
+      if (matchedResult) {
+        const p = matchedResult.product;
+        // Nome do produto (tenta português, depois geral, depois inglês)
+        const name = p.product_name_pt || p.product_name || p.product_name_en || '';
+
+        // Se encontramos o nome nas APIs Open Facts, retorna diretamente
+        if (name.trim() !== '') {
+          const apiType = matchedResult.type;
+          const brand = p.brands ? p.brands.split(',')[0].trim() : '';
+          const image = p.image_front_url || p.image_url || '';
+          
+          // Mapeia categoria padrão com base na API que respondeu
+          let fallbackCat = 'Mercearia';
+          if (apiType === 'beauty') fallbackCat = 'Higiene e Beleza';
+          if (apiType === 'products') fallbackCat = 'Limpeza';
+          if (apiType === 'pet') fallbackCat = 'Pet Shop';
+
+          const category = mapCategory(p.categories || '', p.categories_tags || []);
+          
+          // Ajustes finos de categoria caso o mapeamento de texto retorne genérico
+          let finalCategory = category;
+          if (category === 'Mercearia') {
+            finalCategory = fallbackCat;
+          }
+
+          return {
+            barcode: cleanBarcode,
+            name: name.trim(),
+            brand: brand,
+            category: finalCategory,
+            image: image,
+            price: 0,
+            source: 'Open Food Facts'
+          };
+        }
+      }
+    } catch (error) {
+      console.error('Erro na consulta paralela de APIs:', error);
     }
-  } catch (error) {
-    console.error('Erro na consulta paralela de APIs:', error);
   }
 
-  // Se não encontramos nas APIs públicas ou se o nome veio vazio/nulo,
-  // tenta a API de redundância Barcode Lookup
-  console.log(`Produto ${cleanBarcode} não localizado ou sem nome nas APIs Open Facts. Consultando Barcode Lookup...`);
-  const barcodeLookupResult = await fetchFromBarcodeLookup(cleanBarcode);
-  if (barcodeLookupResult) {
-    return barcodeLookupResult;
+  if (barcodeLookupEnabled) {
+    // Se não encontramos nas APIs públicas ou se o nome veio vazio/nulo,
+    // tenta a API de redundância Barcode Lookup
+    console.log(`Produto ${cleanBarcode} não localizado nas APIs Open Facts. Consultando Barcode Lookup...`);
+    const barcodeLookupResult = await fetchFromBarcodeLookup(cleanBarcode);
+    if (barcodeLookupResult) {
+      return barcodeLookupResult;
+    }
   }
 
-  // Se a Barcode Lookup também falhou, tenta a API UPCitemdb como fallback secundário
-  console.log(`Produto ${cleanBarcode} não encontrado na Barcode Lookup. Consultando UPCitemdb...`);
-  const upcItemDbResult = await fetchFromUPCitemdb(cleanBarcode);
-  if (upcItemDbResult) {
-    return upcItemDbResult;
+  if (upcItemDbEnabled) {
+    // Se a Barcode Lookup também falhou, tenta a API UPCitemdb como fallback secundário
+    console.log(`Produto ${cleanBarcode} não encontrado na Barcode Lookup. Consultando UPCitemdb...`);
+    const upcItemDbResult = await fetchFromUPCitemdb(cleanBarcode);
+    if (upcItemDbResult) {
+      return upcItemDbResult;
+    }
   }
 
-  // Se a UPCitemdb também falhou, mas tínhamos um matchedResult parcial no Open Facts,
+  // Se tudo falhou, mas tínhamos um matchedResult parcial no Open Facts,
   // retorna o produto com nome desconhecido como última alternativa
   if (matchedResult) {
     const p = matchedResult.product;
@@ -169,7 +184,8 @@ export async function fetchProductFromAPI(barcode) {
       brand: brand,
       category: finalCategory,
       image: image,
-      price: 0
+      price: 0,
+      source: 'Open Food Facts'
     };
   }
 
@@ -216,7 +232,8 @@ async function fetchFromBarcodeLookup(barcode) {
         brand: brand.trim(),
         category: category,
         image: image,
-        price: 0
+        price: 0,
+        source: 'Barcode Lookup'
       };
     }
   } catch (error) {
@@ -264,7 +281,8 @@ async function fetchFromUPCitemdb(barcode) {
         brand: brand.trim(),
         category: category,
         image: image,
-        price: 0
+        price: 0,
+        source: 'UPCitemdb'
       };
     }
   } catch (error) {

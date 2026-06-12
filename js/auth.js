@@ -1,17 +1,23 @@
-// Hash SHA-256 da senha padrão ("Pilhaderadio.")
-const AUTH_HASH = "ed1cd5803a3ab9adf61e0c7529094da460c71d545c428c1cc3b65fbb971bd5a9";
-const STORAGE_KEY = "klif_scanner_auth_token";
+const GOOGLE_CLIENT_ID = "983079006399-md2jmn4teu0o18tmua87h5vhn57qlr6l.apps.googleusercontent.com";
+const STORAGE_KEY = "klif_scanner_auth_user";
 
 /**
- * Gera o hash SHA-256 de uma string utilizando a Web Crypto API nativa.
- * @param {string} message 
- * @returns {Promise<string>} hash hex
+ * Função utilitária para decodificar o token JWT retornado pelo Google.
+ * @param {string} token 
+ * @returns {object|null} payload
  */
-async function sha256(message) {
-  const msgBuffer = new TextEncoder().encode(message);
-  const hashBuffer = await crypto.subtle.digest('SHA-256', msgBuffer);
-  const hashArray = Array.from(new Uint8Array(hashBuffer));
-  return hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
+function parseJwt(token) {
+  try {
+    const base64Url = token.split('.')[1];
+    const base64 = base64Url.replace(/-/g, '+').replace(/_/g, '/');
+    const jsonPayload = decodeURIComponent(atob(base64).split('').map(function(c) {
+      return '%' + ('00' + c.charCodeAt(0).toString(16)).slice(-2);
+    }).join(''));
+    return JSON.parse(jsonPayload);
+  } catch (e) {
+    console.error("Falha ao decodificar JWT:", e);
+    return null;
+  }
 }
 
 /**
@@ -19,17 +25,24 @@ async function sha256(message) {
  * @returns {boolean}
  */
 export function isAuthorized() {
-  return localStorage.getItem(STORAGE_KEY) === "true";
+  return !!localStorage.getItem(STORAGE_KEY);
 }
 
 /**
- * Inicializa a tela de bloqueio e gerencia os ouvintes de eventos da autenticação.
+ * Recupera os dados do usuário autenticado.
+ * @returns {object|null}
+ */
+export function getLoggedUser() {
+  const userJson = localStorage.getItem(STORAGE_KEY);
+  return userJson ? JSON.parse(userJson) : null;
+}
+
+/**
+ * Inicializa o Google Identity Services e trata o fluxo de login.
  * @param {Function} onSuccess - Callback executado quando o acesso é liberado.
  */
 export function initAuth(onSuccess) {
   const lockScreen = document.getElementById('lock-screen');
-  const input = document.getElementById('auth-passcode');
-  const submitBtn = document.getElementById('btn-auth-submit');
   const errorMsg = document.getElementById('auth-error');
 
   if (!lockScreen) return;
@@ -44,67 +57,68 @@ export function initAuth(onSuccess) {
 
   // Garante que o lockscreen seja exibido se não estiver autorizado
   lockScreen.classList.remove('hidden');
-  if (input) input.focus();
 
-  const handleAuth = async () => {
-    const password = input.value;
-    if (!password) return;
-
-    submitBtn.disabled = true;
-    if (errorMsg) errorMsg.style.display = 'none';
-
-    // Remove classes antigas de shake caso existam
-    const container = lockScreen.querySelector('.lock-screen-container');
-    if (container) container.classList.remove('shake');
-
-    try {
-      const hash = await sha256(password);
-      if (hash === AUTH_HASH) {
-        localStorage.setItem(STORAGE_KEY, "true");
-        
-        // Aplica animação de saída na overlay
-        lockScreen.style.animation = 'lockScaleOut 0.4s cubic-bezier(0.34, 1.56, 0.64, 1) forwards';
-        lockScreen.classList.add('hidden');
-        
-        setTimeout(() => lockScreen.remove(), 500);
-        if (onSuccess) onSuccess();
-      } else {
-        if (errorMsg) errorMsg.style.display = 'block';
-        
-        // Efeito shake de erro no container do modal
-        if (container) {
-          // Pequeno hack para forçar re-render e rodar a animação novamente
-          void container.offsetWidth; 
-          container.classList.add('shake');
-        }
-
-        input.value = '';
-        input.focus();
-        
-        // Feedback tátil de erro no celular (iOS/Android)
-        if (navigator.vibrate) {
-          try {
-            navigator.vibrate([100, 50, 100]);
-          } catch (e) {
-            // Alguns navegadores barram vibração sem interação física direta prévia
-          }
-        }
-      }
-    } catch (err) {
-      console.error('Erro na autenticação local:', err);
-      alert('Erro inesperado de criptografia no navegador.');
-    } finally {
-      submitBtn.disabled = false;
+  // Callback chamado pelo Google Identity Services após login de sucesso
+  window.handleCredentialResponse = (response) => {
+    const payload = parseJwt(response.credential);
+    
+    if (payload && payload.email_verified) {
+      const userData = {
+        name: payload.name,
+        email: payload.email,
+        picture: payload.picture
+      };
+      
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(userData));
+      
+      // Animação de saída na overlay
+      lockScreen.style.animation = 'lockScaleOut 0.4s cubic-bezier(0.34, 1.56, 0.64, 1) forwards';
+      lockScreen.classList.add('hidden');
+      
+      setTimeout(() => lockScreen.remove(), 500);
+      if (onSuccess) onSuccess();
+    } else {
+      if (errorMsg) errorMsg.style.display = 'block';
     }
   };
 
-  if (submitBtn) {
-    submitBtn.addEventListener('click', handleAuth);
+  // Inicializa o botão do Google quando a API estiver pronta
+  const initializeGoogleBtn = () => {
+    if (typeof google !== 'undefined') {
+      google.accounts.id.initialize({
+        client_id: GOOGLE_CLIENT_ID,
+        callback: window.handleCredentialResponse
+      });
+
+      google.accounts.id.renderButton(
+        document.getElementById("btn-google-container"),
+        { 
+          theme: "filled_blue", 
+          size: "large", 
+          width: "280",
+          text: "signin_with",
+          shape: "pill"
+        }
+      );
+
+      // Exibe One Tap se disponível
+      google.accounts.id.prompt();
+    } else {
+      // Se a biblioteca do Google ainda não carregou, tenta novamente em 100ms
+      setTimeout(initializeGoogleBtn, 100);
+    }
+  };
+
+  initializeGoogleBtn();
+}
+
+/**
+ * Realiza o logout do usuário limpando o localStorage e resetando a sessão.
+ */
+export function logoutUser() {
+  localStorage.removeItem(STORAGE_KEY);
+  if (typeof google !== 'undefined') {
+    google.accounts.id.disableAutoSelect();
   }
-  
-  if (input) {
-    input.addEventListener('keypress', (e) => {
-      if (e.key === 'Enter') handleAuth();
-    });
-  }
+  window.location.reload();
 }
