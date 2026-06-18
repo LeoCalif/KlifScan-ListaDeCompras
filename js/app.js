@@ -27,6 +27,14 @@ import {
 
 import { initAuth, getLoggedUser, logoutUser } from './auth.js';
 
+import {
+  initDriveOAuth,
+  connectDrive,
+  disconnectDrive,
+  syncWithDrive,
+  isDriveConnected
+} from './drive.js';
+
 // --- ESTADO GLOBAL DO APLICATIVO ---
 let appState = {
   activeList: null,     // Lista de compras ativa atualmente (se houver)
@@ -40,7 +48,8 @@ let appState = {
   lastScannedBarcode: null, // Evitar bipes múltiplos em seguida no modo contínuo
   lastScanTimestamp: 0,
   cameras: [],          // Câmeras disponíveis
-  scannerMode: 'shopping' // 'shopping' (carrinho) ou 'consume' (baixa no estoque)
+  scannerMode: 'shopping', // 'shopping' (carrinho) ou 'consume' (baixa no estoque)
+  historyView: 'list'    // 'list' ou 'stats'
 };
 
 // --- INICIALIZAÇÃO DO APP ---
@@ -55,6 +64,9 @@ document.addEventListener('DOMContentLoaded', async () => {
   initAuth(async () => {
     // Inicializa perfil do usuário autenticado pelo Google
     setupUserProfile();
+
+    // Inicializa a conexão com o Google Drive
+    initDriveOAuth(updateDriveSyncUI);
 
 
 
@@ -95,10 +107,10 @@ document.addEventListener('DOMContentLoaded', async () => {
 // --- REGISTRO DE SERVICE WORKER (PWA) ---
 function registerServiceWorker() {
   if ('serviceWorker' in navigator) {
-    window.addEventListener('load', () => {
-      navigator.serviceWorker.register('./sw.js')
-        .then((reg) => console.log('Service Worker registrado com sucesso:', reg.scope))
-        .catch((err) => console.error('Falha ao registrar Service Worker:', err));
+    navigator.serviceWorker.getRegistrations().then((registrations) => {
+      for(let registration of registrations) {
+        registration.unregister().then(() => console.log('SW unregistered'));
+      }
     });
   }
 
@@ -330,6 +342,24 @@ function setupEventListeners() {
   document.getElementById('btn-dispensa-db').addEventListener('click', () => {
     switchTab('products');
   });
+
+  // 14. Google Drive Sync
+  document.getElementById('btn-drive-connect').addEventListener('click', connectDrive);
+  document.getElementById('btn-drive-sync').addEventListener('click', () => syncWithDrive(false));
+  document.getElementById('btn-drive-disconnect').addEventListener('click', async () => {
+    const ok = await showCustomConfirm('Desconectar Sincronização', 'Deseja realmente desativar a sincronização automática com o Google Drive? Seus dados continuarão no Google Drive, mas novas alterações locais não serão enviadas.');
+    if (ok) {
+      disconnectDrive();
+    }
+  });
+
+  // 15. Controle Segmentado do Histórico
+  document.getElementById('btn-history-view-list').addEventListener('click', () => {
+    toggleHistoryView('list');
+  });
+  document.getElementById('btn-history-view-stats').addEventListener('click', () => {
+    toggleHistoryView('stats');
+  });
 }
 
 // --- GERENCIAMENTO DE ABAS (ROTEADOR DE VIEW) ---
@@ -423,6 +453,9 @@ async function finishShoppingList() {
 
   showToast('Compra finalizada com sucesso! Salva no histórico.', 'success');
   switchTab('history');
+  
+  // Sincronização em background
+  syncWithDrive(true);
 }
 
 // Cancela a lista de compras atual
@@ -791,6 +824,9 @@ async function handleDecodedBarcode(barcode) {
         stockItem.quantity--;
         await saveStockItem(stockItem);
         showToast(`Consumido: ${stockItem.name} (-1). Restam: ${stockItem.quantity}`, 'success');
+
+        // Sincronização em background
+        syncWithDrive(true);
       } else {
         showToast(`Aviso: ${stockItem.name} já está com estoque zerado (0).`, 'warning');
       }
@@ -1080,6 +1116,9 @@ async function saveProductFromModal() {
   } else if (appState.currentTab === 'products') {
     renderProductDatabase();
   }
+
+  // Sincronização em background
+  syncWithDrive(true);
 }
 
 // Exclui produto do banco local
@@ -1108,6 +1147,9 @@ async function deleteProductFromModal() {
     } else if (appState.currentTab === 'products') {
       renderProductDatabase();
     }
+
+    // Sincronização em background
+    syncWithDrive(true);
   }
 }
 
@@ -1235,6 +1277,8 @@ async function renderProductDatabase(searchQuery = '') {
 async function renderHistory() {
   const container = document.getElementById('history-list-container');
   const emptyState = document.getElementById('history-empty-state');
+  const selector = document.getElementById('history-view-selector');
+  const statsContainer = document.getElementById('history-stats-container');
   
   container.innerHTML = '';
 
@@ -1244,10 +1288,32 @@ async function renderHistory() {
   if (completedLists.length === 0) {
     container.style.display = 'none';
     emptyState.style.display = 'block';
+    if (selector) selector.style.display = 'none';
+    if (statsContainer) statsContainer.style.display = 'none';
     return;
   }
 
   emptyState.style.display = 'none';
+  if (selector) selector.style.display = 'flex';
+
+  const btnList = document.getElementById('btn-history-view-list');
+  const btnStats = document.getElementById('btn-history-view-stats');
+  if (btnList && btnStats) {
+    if (appState.historyView === 'list') {
+      btnList.classList.add('active');
+      btnStats.classList.remove('active');
+      container.style.display = 'flex';
+      statsContainer.style.display = 'none';
+    } else {
+      btnList.classList.remove('active');
+      btnStats.classList.add('active');
+      container.style.display = 'none';
+      statsContainer.style.display = 'flex';
+      renderStatsDashboard(completedLists);
+      return;
+    }
+  }
+
   container.style.display = 'flex';
 
   completedLists.forEach(list => {
@@ -1350,6 +1416,9 @@ async function deleteHistoryItem() {
     document.getElementById('modal-history-detail').classList.remove('active');
     showToast('Lista de compras excluída do histórico.', 'info');
     renderHistory();
+
+    // Sincronização em background
+    syncWithDrive(true);
   }
 }
 
@@ -1507,6 +1576,9 @@ async function importDatabase(event) {
       } else if (appState.currentTab === 'dispensa') {
         renderDispensa();
       }
+
+      // Sincronização em background
+      syncWithDrive(true);
     } catch (err) {
       console.error(err);
       showToast('Erro ao processar arquivo de backup.', 'danger');
@@ -1901,6 +1973,9 @@ async function handleAddHistoryToStock() {
     if (appState.currentTab === 'dispensa') {
       renderDispensa();
     }
+
+    // Sincronização em background
+    syncWithDrive(true);
   } catch (err) {
     console.error('Erro ao enviar compra para dispensa:', err);
     showToast('Ocorreu um erro ao estocar os itens.', 'danger');
@@ -2020,6 +2095,9 @@ async function updateStockItemQty(barcode, change) {
   item.quantity = newQty;
   await saveStockItem(item);
   renderDispensa(document.getElementById('dispensa-search-input').value);
+
+  // Sincronização em background
+  syncWithDrive(true);
 }
 
 // Remove o item da dispensa completamente
@@ -2032,5 +2110,144 @@ async function removeStockItem(barcode) {
     await deleteStockItem(barcode);
     showToast('Produto removido da dispensa.', 'info');
     renderDispensa(document.getElementById('dispensa-search-input').value);
+
+    // Sincronização em background
+    syncWithDrive(true);
+  }
+}
+
+// --- GOOGLE DRIVE SYNC UI AND CONTROLS ---
+
+function updateDriveSyncUI(syncState) {
+  const statusTextEl = document.getElementById('drive-sync-status-text');
+  const lastTimeEl = document.getElementById('drive-sync-last-time');
+  const btnConnect = document.getElementById('btn-drive-connect');
+  const btnSync = document.getElementById('btn-drive-sync');
+  const btnDisconnect = document.getElementById('btn-drive-disconnect');
+
+  if (!statusTextEl || !lastTimeEl) return;
+
+  statusTextEl.textContent = syncState.text;
+  lastTimeEl.textContent = syncState.lastSyncText;
+
+  if (syncState.status === 'connected') {
+    statusTextEl.style.color = 'var(--color-success)';
+    btnConnect.style.display = 'none';
+    btnSync.style.display = 'flex';
+    btnDisconnect.style.display = 'flex';
+  } else if (syncState.status === 'syncing') {
+    statusTextEl.style.color = 'var(--accent-cyan)';
+    btnConnect.style.display = 'none';
+    btnSync.style.display = 'flex';
+    btnDisconnect.style.display = 'flex';
+  } else if (syncState.status === 'connecting') {
+    statusTextEl.style.color = 'var(--accent-violet)';
+    btnConnect.style.display = 'flex';
+    btnSync.style.display = 'none';
+    btnDisconnect.style.display = 'none';
+  } else if (syncState.status === 'error') {
+    statusTextEl.style.color = 'var(--color-danger)';
+    btnConnect.style.display = 'flex';
+    btnSync.style.display = 'none';
+    btnDisconnect.style.display = 'none';
+  } else { // disconnected
+    statusTextEl.style.color = 'var(--text-muted)';
+    btnConnect.style.display = 'flex';
+    btnSync.style.display = 'none';
+    btnDisconnect.style.display = 'none';
+  }
+}
+
+// --- CONTROLE DE VISUALIZAÇÃO DO HISTÓRICO ---
+
+function toggleHistoryView(viewMode) {
+  appState.historyView = viewMode;
+  renderHistory();
+}
+
+// --- RENDERIZAÇÃO DO PAINEL DE ESTATÍSTICAS ---
+
+function renderStatsDashboard(completedLists) {
+  // 1. Resumo Financeiro
+  const totalSpent = completedLists.reduce((sum, list) => sum + (list.total || 0), 0);
+  const averageSpent = completedLists.length > 0 ? totalSpent / completedLists.length : 0;
+
+  document.getElementById('stats-total-spent').textContent = `R$ ${totalSpent.toFixed(2).replace('.', ',')}`;
+  document.getElementById('stats-average-spent').textContent = `R$ ${averageSpent.toFixed(2).replace('.', ',')}`;
+
+  // 2. Gastos por Categoria
+  const categorySpend = {};
+  completedLists.forEach(list => {
+    list.items.forEach(item => {
+      const category = item.category || 'Outros';
+      const spend = (item.price || 0) * (item.quantity || 0);
+      categorySpend[category] = (categorySpend[category] || 0) + spend;
+    });
+  });
+
+  const sortedCategories = Object.entries(categorySpend)
+    .filter(([_, value]) => value > 0)
+    .sort((a, b) => b[1] - a[1]);
+
+  const maxSpend = sortedCategories.length > 0 ? sortedCategories[0][1] : 0;
+  const catContainer = document.getElementById('stats-categories-list');
+
+  if (sortedCategories.length === 0) {
+    catContainer.innerHTML = '<div style="font-size: 12px; color: var(--text-muted); text-align: center; padding: 10px;">Sem dados de categorias.</div>';
+  } else {
+    catContainer.innerHTML = sortedCategories.map(([cat, val]) => {
+      const pct = maxSpend > 0 ? (val / maxSpend) * 100 : 0;
+      return `
+        <div class="category-chart-item">
+          <div class="category-chart-header">
+            <span style="color: var(--text-primary);">${cat}</span>
+            <span style="color: var(--accent-cyan); font-weight: 600;">R$ ${val.toFixed(2).replace('.', ',')}</span>
+          </div>
+          <div class="category-chart-bar-container">
+            <div class="category-chart-bar-fill" style="width: ${pct}%"></div>
+          </div>
+        </div>
+      `;
+    }).join('');
+  }
+
+  // 3. Top 5 Produtos Frequentes
+  const productFreq = {};
+  completedLists.forEach(list => {
+    list.items.forEach(item => {
+      const barcode = item.barcode;
+      if (!productFreq[barcode]) {
+        productFreq[barcode] = {
+          name: item.name,
+          brand: item.brand || '',
+          quantity: 0
+        };
+      }
+      productFreq[barcode].quantity += (item.quantity || 0);
+    });
+  });
+
+  const sortedProducts = Object.values(productFreq)
+    .filter(p => p.quantity > 0)
+    .sort((a, b) => b.quantity - a.quantity)
+    .slice(0, 5);
+
+  const prodContainer = document.getElementById('stats-products-list');
+
+  if (sortedProducts.length === 0) {
+    prodContainer.innerHTML = '<div style="font-size: 12px; color: var(--text-muted); text-align: center; padding: 10px;">Sem dados de produtos.</div>';
+  } else {
+    prodContainer.innerHTML = sortedProducts.map((p, index) => {
+      return `
+        <div class="frequent-product-item">
+          <div class="frequent-product-rank">#${index + 1}</div>
+          <div class="frequent-product-details">
+            <div class="frequent-product-name">${p.name}</div>
+            <div class="frequent-product-brand">${p.brand || 'Sem marca'}</div>
+          </div>
+          <div class="frequent-product-qty">${p.quantity} un.</div>
+        </div>
+      `;
+    }).join('');
   }
 }

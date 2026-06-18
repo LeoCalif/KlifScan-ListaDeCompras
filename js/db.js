@@ -57,12 +57,15 @@ export async function getProduct(barcode) {
     const store = transaction.objectStore('products');
     const request = store.get(barcode);
 
-    request.onsuccess = () => resolve(request.result || null);
+    request.onsuccess = () => {
+      const result = request.result;
+      resolve(result && !result.deleted ? result : null);
+    };
     request.onerror = () => reject(request.error);
   });
 }
 
-export async function saveProduct(product) {
+export async function saveProduct(product, updateTimestamp = true) {
   const db = await getDB();
   return new Promise((resolve, reject) => {
     const transaction = db.transaction('products', 'readwrite');
@@ -77,8 +80,11 @@ export async function saveProduct(product) {
       image: product.image || '',
       price: typeof product.price === 'number' ? product.price : 0,
       source: product.source || 'Manual',
-      lastUpdated: Date.now()
+      lastUpdated: updateTimestamp ? Date.now() : (product.lastUpdated || Date.now())
     };
+    if (product.deleted) {
+      updatedProduct.deleted = true;
+    }
 
     const request = store.put(updatedProduct);
 
@@ -87,14 +93,20 @@ export async function saveProduct(product) {
   });
 }
 
-export async function getAllProducts() {
+export async function getAllProducts(includeDeleted = false) {
   const db = await getDB();
   return new Promise((resolve, reject) => {
     const transaction = db.transaction('products', 'readonly');
     const store = transaction.objectStore('products');
     const request = store.getAll();
 
-    request.onsuccess = () => resolve(request.result || []);
+    request.onsuccess = () => {
+      let result = request.result || [];
+      if (!includeDeleted) {
+        result = result.filter(p => !p.deleted);
+      }
+      resolve(result);
+    };
     request.onerror = () => reject(request.error);
   });
 }
@@ -104,10 +116,18 @@ export async function deleteProduct(barcode) {
   return new Promise((resolve, reject) => {
     const transaction = db.transaction('products', 'readwrite');
     const store = transaction.objectStore('products');
-    const request = store.delete(barcode);
+    const getRequest = store.get(barcode);
 
-    request.onsuccess = () => resolve(true);
-    request.onerror = () => reject(request.error);
+    getRequest.onsuccess = () => {
+      const product = getRequest.result || { barcode: String(barcode) };
+      product.deleted = true;
+      product.lastUpdated = Date.now();
+      
+      const putRequest = store.put(product);
+      putRequest.onsuccess = () => resolve(true);
+      putRequest.onerror = () => reject(putRequest.error);
+    };
+    getRequest.onerror = () => reject(getRequest.error);
   });
 }
 
@@ -120,17 +140,26 @@ export async function getShoppingList(id) {
     const store = transaction.objectStore('shoppingLists');
     const request = store.get(id);
 
-    request.onsuccess = () => resolve(request.result || null);
+    request.onsuccess = () => {
+      const result = request.result;
+      resolve(result && !result.deleted ? result : null);
+    };
     request.onerror = () => reject(request.error);
   });
 }
 
-export async function saveShoppingList(list) {
+export async function saveShoppingList(list, updateTimestamp = true) {
   const db = await getDB();
   return new Promise((resolve, reject) => {
     const transaction = db.transaction('shoppingLists', 'readwrite');
     const store = transaction.objectStore('shoppingLists');
     
+    if (updateTimestamp) {
+      list.lastUpdated = Date.now();
+    } else {
+      list.lastUpdated = list.lastUpdated || Date.now();
+    }
+
     const request = store.put(list);
 
     request.onsuccess = () => resolve(list);
@@ -143,14 +172,22 @@ export async function deleteShoppingList(id) {
   return new Promise((resolve, reject) => {
     const transaction = db.transaction('shoppingLists', 'readwrite');
     const store = transaction.objectStore('shoppingLists');
-    const request = store.delete(id);
+    const getRequest = store.get(id);
 
-    request.onsuccess = () => resolve(true);
-    request.onerror = () => reject(request.error);
+    getRequest.onsuccess = () => {
+      const list = getRequest.result || { id: id };
+      list.deleted = true;
+      list.lastUpdated = Date.now();
+      
+      const putRequest = store.put(list);
+      putRequest.onsuccess = () => resolve(true);
+      putRequest.onerror = () => reject(putRequest.error);
+    };
+    getRequest.onerror = () => reject(getRequest.error);
   });
 }
 
-export async function getAllShoppingLists() {
+export async function getAllShoppingLists(includeDeleted = false) {
   const db = await getDB();
   return new Promise((resolve, reject) => {
     const transaction = db.transaction('shoppingLists', 'readonly');
@@ -159,7 +196,10 @@ export async function getAllShoppingLists() {
 
     request.onsuccess = () => {
       // Sort lists by date descending (newest first)
-      const lists = request.result || [];
+      let lists = request.result || [];
+      if (!includeDeleted) {
+        lists = lists.filter(l => !l.deleted);
+      }
       lists.sort((a, b) => b.id - a.id);
       resolve(lists);
     };
@@ -204,12 +244,15 @@ export async function getStockItem(barcode) {
     const store = transaction.objectStore('stock');
     const request = store.get(barcode);
 
-    request.onsuccess = () => resolve(request.result || null);
+    request.onsuccess = () => {
+      const result = request.result;
+      resolve(result && !result.deleted ? result : null);
+    };
     request.onerror = () => reject(request.error);
   });
 }
 
-export async function saveStockItem(item) {
+export async function saveStockItem(item, updateTimestamp = true) {
   const db = await getDB();
   return new Promise((resolve, reject) => {
     const transaction = db.transaction('stock', 'readwrite');
@@ -222,8 +265,11 @@ export async function saveStockItem(item) {
       category: item.category || 'Outros',
       image: item.image || '',
       quantity: typeof item.quantity === 'number' ? item.quantity : 0,
-      lastUpdated: Date.now()
+      lastUpdated: updateTimestamp ? Date.now() : (item.lastUpdated || Date.now())
     };
+    if (item.deleted) {
+      updatedItem.deleted = true;
+    }
 
     const request = store.put(updatedItem);
 
@@ -232,14 +278,20 @@ export async function saveStockItem(item) {
   });
 }
 
-export async function getAllStockItems() {
+export async function getAllStockItems(includeDeleted = false) {
   const db = await getDB();
   return new Promise((resolve, reject) => {
     const transaction = db.transaction('stock', 'readonly');
     const store = transaction.objectStore('stock');
     const request = store.getAll();
 
-    request.onsuccess = () => resolve(request.result || []);
+    request.onsuccess = () => {
+      let result = request.result || [];
+      if (!includeDeleted) {
+        result = result.filter(s => !s.deleted);
+      }
+      resolve(result);
+    };
     request.onerror = () => reject(request.error);
   });
 }
@@ -249,10 +301,18 @@ export async function deleteStockItem(barcode) {
   return new Promise((resolve, reject) => {
     const transaction = db.transaction('stock', 'readwrite');
     const store = transaction.objectStore('stock');
-    const request = store.delete(barcode);
+    const getRequest = store.get(barcode);
 
-    request.onsuccess = () => resolve(true);
-    request.onerror = () => reject(request.error);
+    getRequest.onsuccess = () => {
+      const item = getRequest.result || { barcode: String(barcode) };
+      item.deleted = true;
+      item.lastUpdated = Date.now();
+      
+      const putRequest = store.put(item);
+      putRequest.onsuccess = () => resolve(true);
+      putRequest.onerror = () => reject(putRequest.error);
+    };
+    getRequest.onerror = () => reject(getRequest.error);
   });
 }
 

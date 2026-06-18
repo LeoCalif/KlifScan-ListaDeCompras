@@ -1,4 +1,4 @@
-const CACHE_NAME = 'klif-scan-cache-v9';
+const CACHE_NAME = 'klif-scan-cache-v10';
 const ASSETS = [
   './',
   './index.html',
@@ -9,6 +9,7 @@ const ASSETS = [
   './js/api.js',
   './js/scanner.js',
   './js/auth.js',
+  './js/drive.js',
   './js/app.js',
   './js/libs/html5-qrcode.min.js'
 ];

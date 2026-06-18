@@ -787,7 +787,7 @@ select.input-control {
   background: rgba(4, 6, 11, 0.7);
   backdrop-filter: blur(8px);
   -webkit-backdrop-filter: blur(8px);
-  z-index: 200;
+  z-index: 10100;
   display: flex;
   align-items: flex-end; /* Bottom sheet para mobile */
   justify-content: center;
@@ -1460,6 +1460,110 @@ select.input-control {
   margin-top: auto;
   border-bottom: 1px solid var(--border-glass);
   border-radius: 24px;
+}
+
+/* --- SEGMENTED CONTROL --- */
+.segmented-control {
+  display: flex;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-glass);
+  border-radius: 24px;
+  padding: 4px;
+  box-shadow: var(--shadow-inset);
+}
+
+.control-item {
+  background: none;
+  border: none;
+  color: var(--text-secondary);
+  font-family: var(--font-title);
+  font-size: 13px;
+  font-weight: 600;
+  padding: 10px 16px;
+  border-radius: 20px;
+  cursor: pointer;
+  transition: var(--transition-smooth);
+}
+
+.control-item.active {
+  background: var(--accent-violet);
+  color: var(--text-primary);
+  box-shadow: 0 4px 12px var(--accent-violet-glow);
+}
+
+/* --- STATS CATEGORIES CHART --- */
+.category-chart-item {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.category-chart-header {
+  display: flex;
+  justify-content: space-between;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.category-chart-bar-container {
+  height: 8px;
+  background: var(--bg-tertiary);
+  border-radius: 4px;
+  overflow: hidden;
+}
+
+.category-chart-bar-fill {
+  height: 100%;
+  border-radius: 4px;
+  background: linear-gradient(90deg, var(--accent-violet) 0%, var(--accent-cyan) 100%);
+  width: 0%;
+  transition: width 0.6s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+/* --- STATS FREQUENT PRODUCTS --- */
+.frequent-product-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 10px 12px;
+  background: rgba(255, 255, 255, 0.02);
+  border: 1px solid var(--border-glass);
+  border-radius: 12px;
+  gap: 10px;
+}
+
+.frequent-product-rank {
+  font-family: var(--font-title);
+  font-size: 14px;
+  font-weight: 800;
+  color: var(--accent-pink);
+  width: 24px;
+}
+
+.frequent-product-details {
+  flex: 1;
+  min-width: 0;
+}
+
+.frequent-product-name {
+  font-size: 13px;
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.frequent-product-brand {
+  font-size: 11px;
+  color: var(--text-secondary);
+}
+
+.frequent-product-qty {
+  font-family: var(--font-title);
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--accent-cyan);
+  white-space: nowrap;
 }
 
 

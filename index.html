@@ -129,6 +129,12 @@
         </h2>
       </div>
 
+      <!-- SELETOR DE VIEW NO HISTÓRICO -->
+      <div id="history-view-selector" class="segmented-control" style="margin-bottom: 20px; display: none;">
+        <button id="btn-history-view-list" class="control-item active" style="flex: 1;">Lista de Compras</button>
+        <button id="btn-history-view-stats" class="control-item" style="flex: 1;">Estatísticas de Gastos</button>
+      </div>
+
       <div id="history-empty-state" class="empty-state">
         <svg fill="none" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
           <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-3 7h3m-3 4h3m-6-4h.01M9 16h.01"/>
@@ -138,6 +144,49 @@
 
       <div id="history-list-container" class="history-list">
         <!-- Renderizado via JS -->
+      </div>
+
+      <!-- CONTAINER DE ESTATÍSTICAS -->
+      <div id="history-stats-container" style="display: none; flex-direction: column; gap: 16px; padding-bottom: 20px;">
+        <!-- Card 1: Resumo Financeiro -->
+        <div class="card">
+          <h3 class="card-title" style="margin-bottom: 16px; font-size: 15px; color: var(--accent-cyan);">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" style="width: 16px; height: 16px; stroke: var(--accent-cyan);"><path stroke-linecap="round" stroke-linejoin="round" d="M12 6v12m-3-2.818l.879.879A9 9 0 0021 12V3m0 0h-9m9 0v9"/></svg>
+            Resumo Financeiro
+          </h3>
+          <div class="shopping-stats" style="margin-bottom: 0;">
+            <div class="stat-box">
+              <div class="stat-label">Total Gasto</div>
+              <div id="stats-total-spent" class="stat-value total" style="color: var(--accent-cyan);">R$ 0,00</div>
+            </div>
+            <div class="stat-box">
+              <div class="stat-label">Média por Compra</div>
+              <div id="stats-average-spent" class="stat-value" style="color: var(--text-primary);">R$ 0,00</div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Card 2: Gastos por Categoria -->
+        <div class="card">
+          <h3 class="card-title" style="margin-bottom: 16px; font-size: 15px; color: var(--accent-violet);">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" style="width: 16px; height: 16px; stroke: var(--accent-violet);"><path stroke-linecap="round" stroke-linejoin="round" d="M10.5 6a7.5 7.5 0 107.5 7.5h-7.5V6z"/><path stroke-linecap="round" stroke-linejoin="round" d="M13.5 10.5H21A7.5 7.5 0 0013.5 3v7.5z"/></svg>
+            Distribuição por Categoria
+          </h3>
+          <div id="stats-categories-list" style="display: flex; flex-direction: column; gap: 14px;">
+            <!-- Barras geradas via JS -->
+          </div>
+        </div>
+
+        <!-- Card 3: Produtos Mais Comprados -->
+        <div class="card">
+          <h3 class="card-title" style="margin-bottom: 16px; font-size: 15px; color: var(--accent-pink);">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" style="width: 16px; height: 16px; stroke: var(--accent-pink);"><path stroke-linecap="round" stroke-linejoin="round" d="M9 12l2 2 4-4M7.835 4.697a3.42 3.42 0 001.946-.806 3.42 3.42 0 014.438 0 3.42 3.42 0 001.946.806 3.42 3.42 0 013.138 3.138 3.42 3.42 0 00.806 1.946 3.42 3.42 0 010 4.438 3.42 3.42 0 00-.806 1.946 3.42 3.42 0 01-3.138 3.138 3.42 3.42 0 00-1.946.806 3.42 3.42 0 01-4.438 0 3.42 3.42 0 00-1.946-.806 3.42 3.42 0 01-3.138-3.138z"/></svg>
+            Produtos Mais Frequentes
+          </h3>
+          <div id="stats-products-list" style="display: flex; flex-direction: column; gap: 10px;">
+            <!-- Produtos gerados via JS -->
+          </div>
+        </div>
       </div>
     </section>
 
@@ -266,6 +315,36 @@
           </button>
         </div>
 
+        <!-- Sincronização em Nuvem (Google Drive) -->
+        <div class="card" style="margin-top: 20px;">
+          <h2 class="card-title" style="margin-bottom: 20px;">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" xmlns="http://www.w3.org/2000/svg" style="stroke: var(--accent-cyan); width: 22px; height: 22px;"><path stroke-linecap="round" stroke-linejoin="round" d="M12 16.5V9.75m0 0l3 3m-3-3l-3 3M6.75 19.5a4.5 4.5 0 01-1.41-8.775 5.25 5.25 0 0110.233-2.33 3 3 0 013.758 3.848A3.752 3.752 0 0118 19.5H6.75z"/></svg>
+            Sincronização em Nuvem (Google Drive)
+          </h2>
+          <p style="font-size: 12px; color: var(--text-secondary); margin-bottom: 16px; line-height: 1.6;">
+            Sincronize seu catálogo, despensa e histórico com sua conta pessoal do Google Drive de forma 100% segura e privada (utiliza a pasta oculta de dados do app).
+          </p>
+          
+          <div id="drive-sync-status-card" class="stat-box" style="display: flex; flex-direction: column; align-items: center; padding: 16px; margin-bottom: 16px; gap: 8px;">
+            <div style="font-size: 10px; text-transform: uppercase; color: var(--text-secondary); letter-spacing: 0.5px;">Status da Nuvem</div>
+            <div id="drive-sync-status-text" style="font-family: var(--font-title); font-size: 15px; font-weight: 700; color: var(--text-muted);">Não Conectado</div>
+            <div id="drive-sync-last-time" style="font-size: 11px; color: var(--text-secondary);">Faça login para ativar a sincronização</div>
+          </div>
+
+          <div style="display: flex; flex-direction: column; gap: 10px;">
+            <button id="btn-drive-connect" class="btn btn-full" style="padding: 10px; font-size: 12px; justify-content: center; display: flex; align-items: center; gap: 6px;">
+              <svg viewBox="0 0 24 24" fill="currentColor" style="width: 14px; height: 14px;"><path d="M19.376 12.4H4.624L2.3 8.36h14.752zM9.04 13.6h5.92L12.64 18.8zM15.936 13.6L18.256 17.64 12.352 7.4 14.128 4.3z"/></svg>
+              Conectar Google Drive
+            </button>
+            <button id="btn-drive-sync" class="btn btn-primary btn-full" style="padding: 10px; font-size: 12px; justify-content: center; display: flex; align-items: center; gap: 6px; display: none;">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" style="width: 14px; height: 14px;"><path stroke-linecap="round" stroke-linejoin="round" d="M16.023 9.348h4.992v-.001M2.985 19.644v-4.992m0 0h4.992m-4.993 0l3.181 3.183a8.25 8.25 0 0013.803-3.7M4.031 9.865a8.25 8.25 0 0113.803-3.7l3.181 3.182m0-4.991v4.99" /></svg>
+              Sincronizar Agora
+            </button>
+            <button id="btn-drive-disconnect" class="btn btn-danger btn-full" style="padding: 10px; font-size: 12px; justify-content: center; display: flex; align-items: center; gap: 6px; display: none; background: transparent; border: 1px solid var(--color-danger); box-shadow: none;">
+              Desconectar Sincronização
+            </button>
+          </div>
+        </div>
 
         <!-- Instalação do PWA (Botão Invisível por padrão) -->
         <div id="pwa-install-container" style="display: none; margin-top: 24px;">
