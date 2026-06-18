@@ -148,6 +148,18 @@
 
       <!-- CONTAINER DE ESTATÍSTICAS -->
       <div id="history-stats-container" style="display: none; flex-direction: column; gap: 16px; padding-bottom: 20px;">
+        <!-- Seletor de Período -->
+        <div class="card" style="display: flex; flex-direction: row; justify-content: space-between; align-items: center; padding: 12px 20px;">
+          <label style="font-family: var(--font-title); font-size: 13px; font-weight: 700; color: var(--text-primary); margin-bottom: 0;">Filtrar Período:</label>
+          <select id="stats-period-select" class="input-control" style="width: auto; padding: 6px 12px; font-size: 12px; height: 32px; margin-bottom: 0; background: var(--bg-secondary); border-radius: 16px; border: 1px solid var(--border-glass);">
+            <option value="all">Todo o Histórico</option>
+            <option value="current-month">Mês Atual</option>
+            <option value="3-months">Últimos 3 Meses</option>
+            <option value="6-months">Últimos 6 Meses</option>
+            <option value="current-year">Ano Atual</option>
+          </select>
+        </div>
+
         <!-- Card 1: Resumo Financeiro -->
         <div class="card">
           <h3 class="card-title" style="margin-bottom: 16px; font-size: 15px; color: var(--accent-cyan);">
@@ -483,6 +495,10 @@
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width: 14px; height: 14px;"><path stroke-linecap="round" stroke-linejoin="round" d="M12 6v6h4.5m4.5 0a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
               Preços nas Compras Anteriores
             </label>
+            <!-- Gráfico de Preços (CSS columns) -->
+            <div id="product-price-history-chart" style="display: none; align-items: flex-end; justify-content: space-around; height: 75px; padding: 8px 4px; margin-bottom: 12px; border-bottom: 1px dashed var(--border-glass); gap: 6px;">
+              <!-- Colunas geradas dinamicamente via JS -->
+            </div>
             <div id="product-price-history-list" class="price-history-list">
               <!-- Renderizado via JS -->
             </div>
@@ -546,10 +562,14 @@
       </div>
       <div class="modal-footer">
         <button type="button" id="btn-hist-delete" class="btn btn-danger">Excluir</button>
+        <button type="button" id="btn-hist-export" class="btn" style="flex: 1; background: rgba(139, 92, 246, 0.1); border: 1px solid var(--accent-violet); color: var(--accent-violet); justify-content: center; display: flex; align-items: center; gap: 4px;">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" style="width: 14px; height: 14px;"><path stroke-linecap="round" stroke-linejoin="round" d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5M16.5 12L12 16.5m0 0L7.5 12m4.5 4.5V3"/></svg>
+          Exportar
+        </button>
         <button type="button" id="btn-hist-stock" class="btn" style="flex: 1; background: rgba(34, 211, 238, 0.1); border: 1px solid var(--accent-cyan); color: var(--accent-cyan);">Estocar</button>
         <button type="button" id="btn-hist-clone" class="btn btn-primary" style="flex: 1.5;">
           <svg viewBox="0 0 24 24" stroke-width="2.5" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" d="M19.5 12c0-1.232-.046-2.453-.138-3.662a4.006 4.006 0 00-3.7-3.7 48.656 48.656 0 00-7.324 0 4.006 4.006 0 00-3.7 3.7C4.547 9.547 4.5 10.768 4.5 12s.047 2.453.138 3.662a4.006 4.006 0 003.7 3.7 48.656 48.656 0 007.324 0 4.006 4.006 0 003.7-3.7c.092-1.209.138-2.43.138-3.662z"/></svg>
-          Refazer Compra
+          Refazer
         </button>
       </div>
     </div>

@@ -360,6 +360,22 @@ function setupEventListeners() {
   document.getElementById('btn-history-view-stats').addEventListener('click', () => {
     toggleHistoryView('stats');
   });
+
+  // 16. Filtro de Período das Estatísticas
+  const periodSelect = document.getElementById('stats-period-select');
+  if (periodSelect) {
+    periodSelect.addEventListener('change', () => {
+      renderHistory();
+    });
+  }
+
+  // 17. Exportar Histórico de Compra para CSV
+  const btnExport = document.getElementById('btn-hist-export');
+  if (btnExport) {
+    btnExport.addEventListener('click', () => {
+      exportHistoryListToCSV();
+    });
+  }
 }
 
 // --- GERENCIAMENTO DE ABAS (ROTEADOR DE VIEW) ---
@@ -1309,7 +1325,28 @@ async function renderHistory() {
       btnStats.classList.add('active');
       container.style.display = 'none';
       statsContainer.style.display = 'flex';
-      renderStatsDashboard(completedLists);
+
+      // Filtra listas pelo período selecionado
+      const periodSelect = document.getElementById('stats-period-select');
+      const period = periodSelect ? periodSelect.value : 'all';
+      let filteredLists = [...completedLists];
+      const now = new Date();
+
+      if (period === 'current-month') {
+        const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1).getTime();
+        filteredLists = completedLists.filter(l => (l.date || l.id) >= startOfMonth);
+      } else if (period === '3-months') {
+        const threeMonthsAgo = new Date(now.getFullYear(), now.getMonth() - 3, now.getDate()).getTime();
+        filteredLists = completedLists.filter(l => (l.date || l.id) >= threeMonthsAgo);
+      } else if (period === '6-months') {
+        const sixMonthsAgo = new Date(now.getFullYear(), now.getMonth() - 6, now.getDate()).getTime();
+        filteredLists = completedLists.filter(l => (l.date || l.id) >= sixMonthsAgo);
+      } else if (period === 'current-year') {
+        const startOfYear = new Date(now.getFullYear(), 0, 1).getTime();
+        filteredLists = completedLists.filter(l => (l.date || l.id) >= startOfYear);
+      }
+
+      renderStatsDashboard(filteredLists);
       return;
     }
   }
@@ -1419,6 +1456,55 @@ async function deleteHistoryItem() {
 
     // Sincronização em background
     syncWithDrive(true);
+  }
+}
+
+// Exporta a lista de compras do histórico selecionada para CSV
+async function exportHistoryListToCSV() {
+  const id = historyDetailListId;
+  if (!id) return;
+
+  try {
+    const list = await getShoppingList(id);
+    if (!list) {
+      showToast('Lista de compras não encontrada.', 'danger');
+      return;
+    }
+
+    // Cabecalho do CSV
+    let csvRows = [];
+    csvRows.push("Codigo de Barras;Nome;Marca;Categoria;Preco Unitario;Quantidade;Total");
+
+    list.items.forEach(item => {
+      // Formata os campos com aspas e substitui delimitadores
+      const barcode = `="${item.barcode}"`; // Força string no Excel para não sumir zeros à esquerda
+      const name = `"${(item.name || '').replace(/"/g, '""')}"`;
+      const brand = `"${(item.brand || '').replace(/"/g, '""')}"`;
+      const category = `"${(item.category || 'Outros').replace(/"/g, '""')}"`;
+      const price = item.price.toFixed(2).replace('.', ',');
+      const qty = item.quantity;
+      const total = (item.price * item.quantity).toFixed(2).replace('.', ',');
+      
+      csvRows.push(`${barcode};${name};${brand};${category};${price};${qty};${total}`);
+    });
+
+    // Cria arquivo Blob com charset UTF-8 e BOM para compatibilidade com o Excel no Windows
+    const csvContent = "\uFEFF" + csvRows.join("\n");
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    
+    const link = document.createElement("a");
+    link.setAttribute("href", url);
+    const fileName = `${list.name.replace(/[^a-z0-9]/gi, '_').toLowerCase()}_export.csv`;
+    link.setAttribute("download", fileName);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    
+    showToast('Lista exportada com sucesso!', 'success');
+  } catch (err) {
+    console.error('Erro ao exportar CSV:', err);
+    showToast('Erro ao exportar a lista.', 'danger');
   }
 }
 
@@ -1849,9 +1935,14 @@ async function getProductPriceHistory(barcode) {
 async function renderPriceHistory(barcode) {
   const container = document.getElementById('product-price-history-section');
   const listContainer = document.getElementById('product-price-history-list');
+  const chartContainer = document.getElementById('product-price-history-chart');
 
   container.style.display = 'none';
   listContainer.innerHTML = '';
+  if (chartContainer) {
+    chartContainer.style.display = 'none';
+    chartContainer.innerHTML = '';
+  }
 
   if (!barcode) return;
 
@@ -1859,6 +1950,61 @@ async function renderPriceHistory(barcode) {
   if (history.length === 0) return;
 
   container.style.display = 'block';
+
+  // Desenha o gráfico se houver mais de 1 registro de preço
+  if (chartContainer && history.length > 1) {
+    chartContainer.style.display = 'flex';
+    // Pega os últimos 5 registros na ordem cronológica (do mais antigo para o mais recente)
+    const chartHistory = [...history].slice(0, 5).reverse();
+    const prices = chartHistory.map(h => h.price);
+    const minPrice = Math.min(...prices);
+    const maxPrice = Math.max(...prices);
+    const priceRange = maxPrice - minPrice;
+
+    chartHistory.forEach(record => {
+      const col = document.createElement('div');
+      col.style.display = 'flex';
+      col.style.flexDirection = 'column';
+      col.style.alignItems = 'center';
+      col.style.flex = '1';
+      col.style.gap = '2px';
+      col.style.height = '100%';
+      col.style.justifyContent = 'flex-end';
+
+      // Calcula a altura proporcional da barra (de 20% a 75%)
+      let pct = 45;
+      if (priceRange > 0) {
+        pct = 20 + ((record.price - minPrice) / priceRange) * 55;
+      }
+
+      const bar = document.createElement('div');
+      bar.style.width = '10px';
+      bar.style.height = `${pct}%`;
+      bar.style.background = 'linear-gradient(180deg, var(--accent-cyan) 0%, rgba(34, 211, 238, 0.1) 100%)';
+      bar.style.borderRadius = '4px';
+      bar.style.boxShadow = '0 0 6px var(--accent-cyan-glow)';
+      bar.title = `R$ ${record.price.toFixed(2)}`;
+
+      const labelPrice = document.createElement('span');
+      labelPrice.style.fontSize = '8px';
+      labelPrice.style.color = 'var(--accent-cyan)';
+      labelPrice.style.fontWeight = '700';
+      labelPrice.style.whiteSpace = 'nowrap';
+      labelPrice.textContent = `R$${record.price.toFixed(2)}`;
+
+      const labelDate = document.createElement('span');
+      labelDate.style.fontSize = '8px';
+      labelDate.style.color = 'var(--text-secondary)';
+      labelDate.style.whiteSpace = 'nowrap';
+      const d = new Date(record.date);
+      labelDate.textContent = `${d.getDate()}/${d.getMonth() + 1}`;
+
+      col.appendChild(labelPrice);
+      col.appendChild(bar);
+      col.appendChild(labelDate);
+      chartContainer.appendChild(col);
+    });
+  }
 
   // Renderiza no máximo 4 registros passados
   const maxHistory = history.slice(0, 4);
